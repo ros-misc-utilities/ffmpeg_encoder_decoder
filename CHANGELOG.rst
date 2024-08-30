@@ -2,7 +2,7 @@
 Changelog for package ffmpeg_encoder_decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.0.1 (2024-08-30)
+------------------
 * initial commit
 * Contributors: Bernd Pfrommer

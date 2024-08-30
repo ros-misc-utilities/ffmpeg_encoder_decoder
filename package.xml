@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>ffmpeg_encoder_decoder</name>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <description>ROS2 convenience wrapper around ffmpeg for encoding/decoding</description>
   <maintainer email="bernd.pfrommer@gmail.com">Bernd Pfrommer</maintainer>
   <license>Apache2</license>
