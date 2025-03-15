@@ -207,6 +207,7 @@ void Encoder::doOpenCodec(int width, int height)
   setAVOption("preset", preset_);
   setAVOption("tune", tune_);
   setAVOption("delay", delay_);
+  setAVOption("crf", crf_);
   RCLCPP_DEBUG(
     logger_,
     "codec: %10s, profile: %10s, preset: %10s,"

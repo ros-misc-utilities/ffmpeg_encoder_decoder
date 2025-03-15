@@ -11,8 +11,7 @@ the [ffmpeg image transport](https://github.com/ros-misc-utilities/ffmpeg_image_
 Continuous integration is tested under Ubuntu with the following ROS2 distros:
 
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Humble)](https://build.ros2.org/job/Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64/)
- [![Build Status](https://build.ros2.org/buildStatus/icon?job=Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Iron)](https://build.ros2.org/job/Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64/)
- [![Build Status](https://build.ros2.org/buildStatus/icon?job=Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Jazzy)](https://build.ros2.org/job/Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
+ [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Jazzy)](https://build.ros2.org/job/Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Rolling)](https://build.ros2.org/job/Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
 
 
@@ -58,23 +57,28 @@ export LD_LIBRARY_PATH=/home/foo/ffmpeg/build/lib:${LD_LIBRARY_PATH}
 ### How to use ffmpeg hardware accelerated encoding on the NVidia Jetson
 
 Follow the instructions
-[here](https://github.com/jocover/jetson-ffmpeg) to build a version of
-ffmpeg that supports NVMPI. Then follow the section above on how to
+[here](https://github.com/Keylost/jetson-ffmpeg) to build a version of
+ffmpeg that supports NVMPI. This long magic line should build a nvmpi enabled
+version of ffmpeg and install it under ``/usr/local/``:
+```
+git clone https://github.com/berndpfrommer/jetson-ffmpeg.git && cd jetson-ffmpeg && mkdir build && cd build && cmake -DCMAKE_INSTALL
+_PREFIX:PATH=/usr/local .. && make install && ldconfig && cd ../.. && git clone git://source.ffmpeg.org/ffmpeg.git -b release/7.1 --
+depth=1 &&cd jetson-ffmpeg && ./ffpatch.sh ../ffmpeg && cd ../ffmpeg && ./configure --enable-nvmpi --enable-shared --disable-static 
+--prefix=/usr/local && make install
+```
+
+Then follow the section above on how to
 actually use that custom ffmpeg library. As always first test on the
 CLI that the newly compiled ``ffmpeg`` command now supports
-``h264_nvmpi``. Afterwards you should be able to use e.g. the ``ffmpeg_image_transport`` with
-parameters like so:
-
-The transport can now be configured to use nvmpi like so:
+``h264_nvmpi``. The transport can then be configured to use
+nvmpi like so:
 
 ```
         parameters=[{'ffmpeg_image_transport.encoding': 'h264_nvmpi',
                      'ffmpeg_image_transport.profile': 'main',
                      'ffmpeg_image_transport.preset': 'll',
-                     'ffmpeg_image_transport.gop': 15}]
+                     'ffmpeg_image_transport.gop_size': 15}]
 ```
-
-
 ## License
 
 This software is issued under the Apache License Version 2.0.
