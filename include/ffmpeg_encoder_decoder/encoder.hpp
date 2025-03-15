@@ -80,7 +80,11 @@ public:
     Lock lock(mutex_);
     delay_ = p;
   }
-
+  void setCRF(const std::string & c)
+  {
+    Lock lock(mutex_);
+    crf_ = c;
+  }
   void setQMax(int q)
   {
     Lock lock(mutex_);
@@ -152,6 +156,7 @@ private:
   std::string profile_;  // e.g. "main", "high", "rext"
   std::string tune_;     // e.g. "tune"
   std::string delay_;    // default is 4 frames for parallel processing. 0 is lowest latency
+  std::string crf_;      // constant rate factor. 0 is lossless, 51 is worst quality
   int qmax_{0};          // max allowed quantization. The lower the better quality
   int GOPSize_{15};      // distance between two keyframes
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
