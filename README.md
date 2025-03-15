@@ -11,8 +11,7 @@ the [ffmpeg image transport](https://github.com/ros-misc-utilities/ffmpeg_image_
 Continuous integration is tested under Ubuntu with the following ROS2 distros:
 
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Humble)](https://build.ros2.org/job/Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64/)
- [![Build Status](https://build.ros2.org/buildStatus/icon?job=Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Iron)](https://build.ros2.org/job/Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64/)
- [![Build Status](https://build.ros2.org/buildStatus/icon?job=Idev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Jazzy)](https://build.ros2.org/job/Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
+ [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Jazzy)](https://build.ros2.org/job/Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Rolling)](https://build.ros2.org/job/Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
 
 
