@@ -38,8 +38,9 @@ Decoder::~Decoder() { reset(); }
 void Decoder::reset()
 {
   if (codecContext_) {
-    avcodec_close(codecContext_);
-    av_free(codecContext_);
+    avcodec_free_context(&codecContext_);
+    // avcodec_close(codecContext_);
+    // av_free(codecContext_);
     codecContext_ = NULL;
   }
   if (swsContext_) {

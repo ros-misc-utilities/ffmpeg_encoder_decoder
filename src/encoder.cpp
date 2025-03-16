@@ -54,7 +54,8 @@ static void free_frame(AVFrame ** frame)
 void Encoder::closeCodec()
 {
   if (codecContext_) {
-    avcodec_close(codecContext_);
+    avcodec_free_context(&codecContext_);
+    // avcodec_close(codecContext_);
     codecContext_ = nullptr;
   }
   free_frame(&frame_);
@@ -174,12 +175,14 @@ void Encoder::doOpenCodec(int width, int height)
     throw(std::runtime_error("cannot find encoder: " + encoder_));
   }
 
-  auto pixFmts = utils::get_encoder_formats(codec);
   // allocate codec context
   codecContext_ = avcodec_alloc_context3(codec);
   if (!codecContext_) {
     throw(std::runtime_error("cannot allocate codec context!"));
   }
+
+  auto pixFmts = utils::get_encoder_formats(codecContext_, codec);
+
   codecContext_->bit_rate = bitRate_;
   codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
   codecContext_->width = width;
