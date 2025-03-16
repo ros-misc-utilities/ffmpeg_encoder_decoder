@@ -56,7 +56,7 @@ std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwfra
 * finds formats that the encoder supports. Note that for VAAPI, this will just
 * return AV_PIX_FMT_VAAPI since it uses hardware frames.
 */
-std::vector<enum AVPixelFormat> get_encoder_formats(const AVCodec * avctx);
+std::vector<enum AVPixelFormat> get_encoder_formats(AVCodecContext *context, const AVCodec * avctx);
 /**!
 * picks from a vector of formats the "best" pixel format for a given encoder
 */
