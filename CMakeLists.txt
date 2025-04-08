@@ -16,7 +16,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(ffmpeg_encoder_decoder)
 
-add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+add_compile_options(-Wall -Wextra -Wpedantic)
+if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.24.0")
+  option(CMAKE_COMPILE_WARNING_AS_ERROR "Treat compiler warnings as errors." ON)
+  mark_as_advanced(CMAKE_COMPILE_WARNING_AS_ERROR)
+else()
+  add_compile_options(-Werror)
+endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
