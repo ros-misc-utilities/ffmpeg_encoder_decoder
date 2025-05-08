@@ -80,17 +80,16 @@ target_include_directories(${PROJECT_NAME}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(${PROJECT_NAME}
-PUBLIC
-  cv_bridge
-  rclcpp
-  sensor_msgs
-)
 
 target_link_libraries(${PROJECT_NAME}
   PUBLIC
     opencv_imgproc
-    PkgConfig::LIBAV)
+    PkgConfig::LIBAV
+    ${sensor_msgs_TARGETS}
+    cv_bridge::cv_bridge
+    rclcpp::rclcpp
+    sensor_msgs::sensor_msgs_library
+)
 
 
 ament_export_targets(${PROJECT_NAME}Targets HAS_LIBRARY_TARGET)
