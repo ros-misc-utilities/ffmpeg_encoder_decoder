@@ -80,11 +80,12 @@ target_include_directories(${PROJECT_NAME}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
-ament_target_dependencies(${PROJECT_NAME}
+target_link_libraries(${PROJECT_NAME}
 PUBLIC
   cv_bridge
   rclcpp
-  sensor_msgs)
+  sensor_msgs
+)
 
 target_link_libraries(${PROJECT_NAME}
   PUBLIC
