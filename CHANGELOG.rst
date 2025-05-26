@@ -2,8 +2,8 @@
 Changelog for package ffmpeg_encoder_decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.0.1 (2025-05-26)
+------------------
 * avoid ament_target_dependencies
 * When using CMake >= 3.24 use CMAKE_COMPILE_WARNING_AS_ERROR variable
 * only build on most recent distros
