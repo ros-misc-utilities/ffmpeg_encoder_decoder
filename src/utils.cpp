@@ -101,12 +101,22 @@ enum AVPixelFormat get_preferred_pixel_format(
   return (AV_PIX_FMT_NONE);
 }
 
-std::vector<enum AVPixelFormat> get_encoder_formats(const AVCodec * c)
+std::vector<enum AVPixelFormat> get_encoder_formats(AVCodecContext * context, const AVCodec * c)
 {
   std::vector<enum AVPixelFormat> formats;
-  if (c && c->pix_fmts) {
-    for (const auto * p = c->pix_fmts; *p != AV_PIX_FMT_NONE; ++p) {
-      formats.push_back(*p);
+  if (c) {
+    const enum AVPixelFormat * pix_fmts = nullptr;
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
+    pix_fmts = c->pix_fmts;
+    (void)context;
+#else
+    avcodec_get_supported_config(
+      context, c, AV_CODEC_CONFIG_PIX_FORMAT, 0, (const void **)&pix_fmts, NULL);
+#endif
+    if (pix_fmts) {
+      for (const auto * p = pix_fmts; *p != AV_PIX_FMT_NONE; ++p) {
+        formats.push_back(*p);
+      }
     }
   }
   return (formats);
