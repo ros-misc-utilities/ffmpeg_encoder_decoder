@@ -105,6 +105,16 @@ public:
     Lock lock(mutex_);
     GOPSize_ = g;
   }
+  int getMaxBFrames() const
+  {
+    Lock lock(mutex_);
+    return (maxBFrames_);
+  }
+  void setMaxBFrames(int b)
+  {
+    Lock lock(mutex_);
+    maxBFrames_ = b;
+  }
   void setFrameRate(int frames, int second)
   {
     Lock lock(mutex_);

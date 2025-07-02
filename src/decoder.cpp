@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <ffmpeg_encoder_decoder/decoder.hpp>
+#include <ffmpeg_encoder_decoder/utils.hpp>
 #include <fstream>
 #include <iomanip>
 #include <opencv2/imgcodecs.hpp>
@@ -23,13 +24,6 @@
 
 namespace ffmpeg_encoder_decoder
 {
-// default mappings
-static const std::unordered_map<std::string, std::string> defaultMap{
-  {{"h264_nvenc", "h264"},
-   {"libx264", "h264"},
-   {"hevc_nvenc", "hevc_cuvid"},
-   {"h264_nvmpi", "h264"},
-   {"h264_vaapi", "h264"}}};
 
 Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) {}
 
@@ -39,8 +33,6 @@ void Decoder::reset()
 {
   if (codecContext_) {
     avcodec_free_context(&codecContext_);
-    // avcodec_close(codecContext_);
-    // av_free(codecContext_);
     codecContext_ = NULL;
   }
   if (swsContext_) {
@@ -56,31 +48,33 @@ void Decoder::reset()
   cpuFrame_ = NULL;
   av_free(colorFrame_);
   colorFrame_ = NULL;
+  hwPixFormat_ = AV_PIX_FMT_NONE;
 }
 
-bool Decoder::initialize(const std::string & encoding, Callback callback, const std::string & dec)
+bool Decoder::initialize(
+  const std::string & encoding, Callback callback, const std::string & decoder)
 {
-  std::string decoder = dec;
-  if (decoder.empty()) {
-    RCLCPP_INFO_STREAM(logger_, "no decoder for encoding: " << encoding);
-    return (false);
-  }
+  return (initialize(
+    encoding, callback,
+    decoder.empty() ? std::vector<std::string>() : std::vector<std::string>{decoder}));
+}
+
+bool Decoder::initialize(
+  const std::string & encoding, Callback callback, const std::vector<std::string> & decoders)
+{
   callback_ = callback;
   encoding_ = encoding;
-  return (initDecoder(encoding_, decoder));
-}
+  if (decoders.empty()) {
+    const auto all_decoders = findDecoders(encoding);
+    std::string decoders_str;
+    for (const auto & decoder : all_decoders) {
+      decoders_str += " " + decoder;
+    }
+    RCLCPP_INFO_STREAM(logger_, "trying discovered decoders in order:" << decoders_str);
 
-static enum AVHWDeviceType get_hw_type(const std::string & name, rclcpp::Logger logger)
-{
-  enum AVHWDeviceType type = av_hwdevice_find_type_by_name(name.c_str());
-  if (type == AV_HWDEVICE_TYPE_NONE) {
-    RCLCPP_INFO_STREAM(logger, "hw accel device is not supported: " << name);
-    RCLCPP_INFO_STREAM(logger, "available devices:");
-    while ((type = av_hwdevice_iterate_types(type)) != AV_HWDEVICE_TYPE_NONE)
-      RCLCPP_INFO_STREAM(logger, av_hwdevice_get_type_name(type));
-    return (type);
+    return (initDecoder(all_decoders));
   }
-  return (type);
+  return (initDecoder(decoders));
 }
 
 static AVBufferRef * hw_decoder_init(
@@ -91,33 +85,15 @@ static AVBufferRef * hw_decoder_init(
     RCLCPP_ERROR_STREAM(logger, "failed to create context for HW device: " << hwType);
     return (NULL);
   }
+  RCLCPP_INFO_STREAM(logger, "using hardware acceleration: " << av_hwdevice_get_type_name(hwType));
   return (av_buffer_ref(*hwDeviceContext));
 }
 
-static std::unordered_map<AVCodecContext *, AVPixelFormat> pix_format_map;
-
-static enum AVPixelFormat get_hw_format(AVCodecContext * ctx, const enum AVPixelFormat * pix_fmts)
-{
-  enum AVPixelFormat pf = pix_format_map[ctx];
-  const enum AVPixelFormat * p;
-  for (p = pix_fmts; *p != -1; p++) {
-    if (*p == pf) {
-      return *p;
-    }
-  }
-  std::cerr << "Failed to get HW surface format." << std::endl;
-  return AV_PIX_FMT_NONE;
-}
-
-static enum AVPixelFormat find_pix_format(
-  const std::string & codecName, enum AVHWDeviceType hwDevType, const AVCodec * codec,
-  const std::string & hwAcc, rclcpp::Logger logger)
+static enum AVPixelFormat find_pix_format(enum AVHWDeviceType hwDevType, const AVCodec * codec)
 {
   for (int i = 0;; i++) {
     const AVCodecHWConfig * config = avcodec_get_hw_config(codec, i);
     if (!config) {
-      RCLCPP_WARN_STREAM(
-        logger, "decoder " << codecName << " does not support hw accel: " << hwAcc);
       return (AV_PIX_FMT_NONE);
     }
     if (
@@ -129,11 +105,126 @@ static enum AVPixelFormat find_pix_format(
   return (AV_PIX_FMT_NONE);
 }
 
-bool Decoder::initDecoder(const std::string & encoding, const std::string & decoder)
+// This function is a adapted version of avcodec_default_get_format
+
+enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelFormat * fmt)
+{
+  const AVPixFmtDescriptor * desc;
+  const AVCodecHWConfig * config;
+  int i, n;
+#ifdef DEBUG_PIXEL_FORMAT
+  if (avctx->codec) {
+    printf("codec is: %s\n", avctx->codec->name);
+  }
+  char buf[64];
+  buf[63] = 0;
+  for (n = 0; fmt[n] != AV_PIX_FMT_NONE; n++) {
+    av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n]);
+    printf("offered pix fmt: %d = %s\n", fmt[n], buf);
+  }
+#endif
+  // If a device was supplied when the codec was opened, assume that the
+  // user wants to use it.
+  if (avctx->hw_device_ctx && avcodec_get_hw_config(avctx->codec, 0)) {
+    AVHWDeviceContext * device_ctx =
+      reinterpret_cast<AVHWDeviceContext *>(avctx->hw_device_ctx->data);
+    for (i = 0;; i++) {
+      config = avcodec_get_hw_config(avctx->codec, i);
+      if (!config) break;
+      if (!(config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) continue;
+      if (device_ctx->type != config->device_type) continue;
+      for (n = 0; fmt[n] != AV_PIX_FMT_NONE; n++) {
+        if (config->pix_fmt == fmt[n]) {
+#ifdef DEBUG_PIXEL_FORMAT
+          av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n]);
+          printf("using pix fmt: %d = %s\n", fmt[n], buf);
+#endif
+          return fmt[n];
+        }
+      }
+    }
+  }
+  // No device or other setup, so we have to choose from things which
+  // don't any other external information.
+
+  // If the last element of the list is a software format, choose it
+  // (this should be best software format if any exist).
+
+  for (n = 0; fmt[n] != AV_PIX_FMT_NONE; n++) {
+  }
+  desc = av_pix_fmt_desc_get(fmt[n - 1]);
+  if (!(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+#ifdef DEBUG_PIXEL_FORMAT
+    av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n - 1]);
+    printf("using unaccelerated last fmt: %d = %s\n", fmt[n - 1], buf);
+#endif
+    return fmt[n - 1];
+  }
+
+  // Finally, traverse the list in order and choose the first entry
+  // with no external dependencies (if there is no hardware configuration
+  // information available then this just picks the first entry).
+  for (n = 0; fmt[n] != AV_PIX_FMT_NONE; n++) {
+    for (i = 0;; i++) {
+      config = avcodec_get_hw_config(avctx->codec, i);
+      if (!config) break;
+      if (config->pix_fmt == fmt[n]) break;
+    }
+    if (!config) {
+      // No specific config available, so the decoder must be able
+      // to handle this format without any additional setup.
+#ifdef DEBUG_PIXEL_FORMAT
+      av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n]);
+      printf("handle without setup %d = %s\n", fmt[n], buf);
+#endif
+      return fmt[n];
+    }
+    if (config->methods & AV_CODEC_HW_CONFIG_METHOD_INTERNAL) {
+// Usable with only internal setup.
+#ifdef DEBUG_PIXEL_FORMAT
+      av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n]);
+      printf("handle with internal setup %d = %s\n", fmt[n], buf);
+#endif
+      return fmt[n];
+    }
+  }
+  // Nothing is usable, give up.
+  return AV_PIX_FMT_NONE;
+}
+
+bool Decoder::initDecoder(const std::vector<std::string> & decoders)
+{
+  for (const auto & decoder : decoders) {
+    const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
+    if (codec) {
+      // use the decoder if it either is software, or has working
+      // hardware support
+      if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+        const AVCodecHWConfig * hwConfig = avcodec_get_hw_config(codec, 0);
+        if (hwConfig) {
+          if (initDecoder(decoder)) {
+            return (true);
+          }
+        }
+      } else {
+        if (initDecoder(decoder)) {
+          return (true);
+        }
+      }
+    }
+  }
+  RCLCPP_ERROR_STREAM(logger_, "none of these requested decoders works: ");
+  for (const auto & decoder : decoders) {
+    RCLCPP_ERROR_STREAM(logger_, "  " << decoder);
+  }
+  throw(std::runtime_error("cannot find matching decoder!"));
+}
+
+bool Decoder::initDecoder(const std::string & decoder)
 {
   try {
-    const AVCodec * codec = NULL;
-    codec = avcodec_find_decoder_by_name(decoder.c_str());
+    // utils::get_decoders_for_encoding();  // initialize the map
+    const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
     if (!codec) {
       RCLCPP_ERROR_STREAM(logger_, "cannot find decoder " << decoder);
       throw(std::runtime_error("cannot find decoder " + decoder));
@@ -145,20 +236,26 @@ bool Decoder::initDecoder(const std::string & encoding, const std::string & deco
       throw(std::runtime_error("alloc context failed!"));
     }
     av_opt_set_int(codecContext_, "refcounted_frames", 1, 0);
-    const std::string hwAcc("cuda");
-    enum AVHWDeviceType hwDevType = get_hw_type(hwAcc, logger_);
+    enum AVHWDeviceType hwDevType = AV_HWDEVICE_TYPE_NONE;
+    if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+      const AVCodecHWConfig * hwConfig = avcodec_get_hw_config(codec, 0);
+      if (hwConfig) {
+        hwDevType = hwConfig->device_type;
+        RCLCPP_INFO_STREAM(
+          logger_, "decoder " << decoder
+                              << " has hw accel config: " << av_hwdevice_get_type_name(hwDevType));
+      } else {
+        RCLCPP_WARN_STREAM(logger_, "decoder " << decoder << " does not have hw accel config!");
+      }
+    } else {
+      RCLCPP_INFO_STREAM(logger_, "decoder " << decoder << " has no hardware acceleration");
+    }
     // default
-    hwPixFormat_ = AV_PIX_FMT_NONE;
-
     if (hwDevType != AV_HWDEVICE_TYPE_NONE) {
       codecContext_->hw_device_ctx = hw_decoder_init(&hwDeviceContext_, hwDevType, logger_);
       if (codecContext_->hw_device_ctx != NULL) {
-        hwPixFormat_ = find_pix_format(encoding, hwDevType, codec, hwAcc, logger_);
-        // must put in global hash for the callback function
-        pix_format_map[codecContext_] = hwPixFormat_;
-        codecContext_->get_format = get_hw_format;
-      } else {  // hardware couldn't be initialized.
-        hwDevType = AV_HWDEVICE_TYPE_NONE;
+        hwPixFormat_ = find_pix_format(hwDevType, codec);
+        codecContext_->get_format = get_format;
       }
     }
     codecContext_->pkt_timebase = timeBase_;
@@ -281,6 +378,24 @@ void Decoder::printTimers(const std::string & prefix) const
 
 const std::unordered_map<std::string, std::string> & Decoder::getDefaultEncoderToDecoderMap()
 {
-  return (defaultMap);
+  RCLCPP_INFO_STREAM(
+    rclcpp::get_logger("ffmpeg_decoder"),
+    "default map is deprecated, use findDecoders() or pass empty string instead!");
+  throw(std::runtime_error("default map is deprecated!"));
+}
+
+void Decoder::findDecoders(
+  const std::string & encoding, std::vector<std::string> * hw_decoders,
+  std::vector<std::string> * sw_decoders)
+{
+  utils::find_decoders(encoding, hw_decoders, sw_decoders);
+}
+
+std::vector<std::string> Decoder::findDecoders(const std::string & encoding)
+{
+  std::vector<std::string> sw_decoders, all_decoders;
+  utils::find_decoders(encoding, &all_decoders, &sw_decoders);
+  all_decoders.insert(all_decoders.end(), sw_decoders.begin(), sw_decoders.end());
+  return (all_decoders);
 }
 }  // namespace ffmpeg_encoder_decoder
