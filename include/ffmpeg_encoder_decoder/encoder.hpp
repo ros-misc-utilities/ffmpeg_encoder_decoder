@@ -157,12 +157,14 @@ private:
   std::string tune_;     // e.g. "tune"
   std::string delay_;    // default is 4 frames for parallel processing. 0 is lowest latency
   std::string crf_;      // constant rate factor. 0 is lossless, 51 is worst quality
-  int qmax_{0};          // max allowed quantization. The lower the better quality
-  int GOPSize_{15};      // distance between two keyframes
+  int qmax_{-1};         // max allowed quantization. The lower the better quality
+  int GOPSize_{-1};      // distance between two keyframes
+  int maxBFrames_{-1};   // maximum number of b-frames
+  int64_t bitRate_{-1};  // max rate in bits/s
+
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
-  int64_t bitRate_{1000000};
   bool usesHardwareFrames_{false};
   // ------ libav state
   AVCodecContext * codecContext_{nullptr};

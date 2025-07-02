@@ -183,14 +183,23 @@ void Encoder::doOpenCodec(int width, int height)
 
   auto pixFmts = utils::get_encoder_formats(codecContext_, codec);
 
-  codecContext_->bit_rate = bitRate_;
-  codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
   codecContext_->width = width;
   codecContext_->height = height;
   codecContext_->time_base = timeBase_;
   codecContext_->framerate = frameRate_;
-  codecContext_->gop_size = GOPSize_;
-  codecContext_->max_b_frames = 0;  // nvenc can only handle zero!
+  if (bitRate_ >= 0) {
+    codecContext_->bit_rate = bitRate_;
+  }
+  if (qmax_ >= 0) {
+    codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
+  }
+  if (GOPSize_ >= 0) {
+    codecContext_->gop_size = GOPSize_;
+  }
+  if (maxBFrames_ >= 0) {
+    // nvenc can only handle zero!
+    codecContext_->max_b_frames = maxBFrames_;
+  }
 
   if (encoder_.find("vaapi") != std::string::npos) {
     openVAAPIDevice(codec, width, height);
@@ -202,7 +211,9 @@ void Encoder::doOpenCodec(int width, int height)
     codecContext_->sw_pix_fmt = frames_ctx->sw_format;
     codecContext_->pix_fmt = frames_ctx->format;
   } else {
-    codecContext_->pix_fmt = utils::get_preferred_pixel_format(encoder_, pixFmts);
+    codecContext_->pix_fmt = (pixFormat_ != AV_PIX_FMT_NONE)
+                               ? pixFormat_
+                               : utils::get_preferred_pixel_format(encoder_, pixFmts);
     codecContext_->sw_pix_fmt = codecContext_->pix_fmt;
   }
 
