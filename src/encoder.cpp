@@ -187,19 +187,10 @@ void Encoder::doOpenCodec(int width, int height)
   codecContext_->height = height;
   codecContext_->time_base = timeBase_;
   codecContext_->framerate = frameRate_;
-  if (bitRate_ >= 0) {
-    codecContext_->bit_rate = bitRate_;
-  }
-  if (qmax_ >= 0) {
-    codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
-  }
-  if (GOPSize_ >= 0) {
-    codecContext_->gop_size = GOPSize_;
-  }
-  if (maxBFrames_ >= 0) {
-    // nvenc can only handle zero!
-    codecContext_->max_b_frames = maxBFrames_;
-  }
+  codecContext_->bit_rate = bitRate_;
+  codecContext_->qmax = qmax_;  // 0: highest, 63: worst quality bound
+  codecContext_->gop_size = GOPSize_;
+  codecContext_->max_b_frames = maxBFrames_;  // nvenc can only handle zero!
 
   if (encoder_.find("vaapi") != std::string::npos) {
     openVAAPIDevice(codec, width, height);

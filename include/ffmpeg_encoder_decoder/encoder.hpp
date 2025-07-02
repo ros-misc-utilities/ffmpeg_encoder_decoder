@@ -170,7 +170,7 @@ private:
   int qmax_{-1};         // max allowed quantization. The lower the better quality
   int GOPSize_{-1};      // distance between two keyframes
   int maxBFrames_{-1};   // maximum number of b-frames
-  int64_t bitRate_{-1};  // max rate in bits/s
+  int64_t bitRate_{0};   // max rate in bits/s
 
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
   AVRational timeBase_{1, 100};
