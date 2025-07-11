@@ -66,6 +66,10 @@ bool Decoder::initialize(
   encoding_ = encoding;
   if (decoders.empty()) {
     const auto all_decoders = findDecoders(encoding);
+    if (all_decoders.empty()) {
+      RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for encoding " << encoding_);
+      throw(std::runtime_error("no decoders discovered for encoding " + encoding_));
+    }
     std::string decoders_str;
     for (const auto & decoder : all_decoders) {
       decoders_str += " " + decoder;
@@ -82,7 +86,8 @@ static AVBufferRef * hw_decoder_init(
 {
   int rc = av_hwdevice_ctx_create(hwDeviceContext, hwType, NULL, NULL, 0);
   if (rc < 0) {
-    RCLCPP_ERROR_STREAM(logger, "failed to create context for HW device: " << hwType);
+    RCLCPP_ERROR_STREAM(
+      logger, "failed to create context for HW device: " << av_hwdevice_get_type_name(hwType));
     return (NULL);
   }
   RCLCPP_INFO_STREAM(logger, "using hardware acceleration: " << av_hwdevice_get_type_name(hwType));
@@ -194,6 +199,10 @@ enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelF
 
 bool Decoder::initDecoder(const std::vector<std::string> & decoders)
 {
+  if (decoders.empty()) {
+    RCLCPP_ERROR_STREAM(logger_, "no decoders configured for this encoding!");
+    throw(std::runtime_error("no decoders configured for this encoding!"));
+  }
   for (const auto & decoder : decoders) {
     const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
     if (codec) {
@@ -202,25 +211,31 @@ bool Decoder::initDecoder(const std::vector<std::string> & decoders)
       if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
         const AVCodecHWConfig * hwConfig = avcodec_get_hw_config(codec, 0);
         if (hwConfig) {
-          if (initDecoder(decoder)) {
+          if (initSingleDecoder(decoder)) {
             return (true);
           }
+        } else {
+          RCLCPP_INFO_STREAM(logger_, "ignoring decoder with no hardware config: " << decoder);
         }
       } else {
-        if (initDecoder(decoder)) {
+        if (initSingleDecoder(decoder)) {
           return (true);
         }
       }
+    } else {
+      RCLCPP_WARN_STREAM(logger_, "unknown decoder: " << decoder);
     }
   }
-  RCLCPP_ERROR_STREAM(logger_, "none of these requested decoders works: ");
-  for (const auto & decoder : decoders) {
-    RCLCPP_ERROR_STREAM(logger_, "  " << decoder);
+  if (decoders.size() > 1) {
+    RCLCPP_ERROR_STREAM(logger_, "none of these requested decoders works: ");
+    for (const auto & decoder : decoders) {
+      RCLCPP_ERROR_STREAM(logger_, "  " << decoder);
+    }
   }
   throw(std::runtime_error("cannot find matching decoder!"));
 }
 
-bool Decoder::initDecoder(const std::string & decoder)
+bool Decoder::initSingleDecoder(const std::string & decoder)
 {
   try {
     // utils::get_decoders_for_encoding();  // initialize the map
@@ -242,10 +257,10 @@ bool Decoder::initDecoder(const std::string & decoder)
       if (hwConfig) {
         hwDevType = hwConfig->device_type;
         RCLCPP_INFO_STREAM(
-          logger_, "decoder " << decoder
-                              << " has hw accel config: " << av_hwdevice_get_type_name(hwDevType));
+          logger_,
+          "decoder " << decoder << " has hw accelerator: " << av_hwdevice_get_type_name(hwDevType));
       } else {
-        RCLCPP_WARN_STREAM(logger_, "decoder " << decoder << " does not have hw accel config!");
+        RCLCPP_WARN_STREAM(logger_, "decoder " << decoder << " does not have hw acceleration!");
       }
     } else {
       RCLCPP_INFO_STREAM(logger_, "decoder " << decoder << " has no hardware acceleration");
@@ -261,11 +276,10 @@ bool Decoder::initDecoder(const std::string & decoder)
     codecContext_->pkt_timebase = timeBase_;
 
     if (avcodec_open2(codecContext_, codec, NULL) < 0) {
-      RCLCPP_ERROR_STREAM(logger_, "open context failed for " + decoder);
       av_free(codecContext_);
       codecContext_ = NULL;
       codec = NULL;
-      throw(std::runtime_error("open context failed!"));
+      throw(std::runtime_error("open context failed for " + decoder));
     }
     decodedFrame_ = av_frame_alloc();
     cpuFrame_ = (hwPixFormat_ == AV_PIX_FMT_NONE) ? NULL : av_frame_alloc();

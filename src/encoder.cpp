@@ -43,6 +43,13 @@ void Encoder::reset()
   closeCodec();
 }
 
+void Encoder::setEncoder(const std::string & n)
+{
+  Lock lock(mutex_);
+  encoder_ = n;
+  encoding_ = utils::find_encoding(encoder_);
+}
+
 static void free_frame(AVFrame ** frame)
 {
   if (*frame) {
@@ -94,10 +101,11 @@ bool Encoder::initialize(int width, int height, Callback callback)
   return (openCodec(width, height));
 }
 
-void Encoder::openVAAPIDevice(const AVCodec * codec, int width, int height)
+void Encoder::openHardwareDevice(
+  const AVCodec * codec, enum AVHWDeviceType hwDevType, int width, int height)
 {
   int err = 0;
-  err = av_hwdevice_ctx_create(&hwDeviceContext_, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0);
+  err = av_hwdevice_ctx_create(&hwDeviceContext_, hwDevType, NULL, NULL, 0);
   utils::check_for_err("cannot create hw device context", err);
   AVBufferRef * hw_frames_ref = av_hwframe_ctx_alloc(hwDeviceContext_);
   if (!hw_frames_ref) {
@@ -105,7 +113,7 @@ void Encoder::openVAAPIDevice(const AVCodec * codec, int width, int height)
   }
 
   AVHWFramesContext * frames_ctx = reinterpret_cast<AVHWFramesContext *>(hw_frames_ref->data);
-  frames_ctx->format = utils::find_hw_config(&usesHardwareFrames_, AV_HWDEVICE_TYPE_VAAPI, codec);
+  frames_ctx->format = utils::find_hw_config(&usesHardwareFrames_, hwDevType, codec);
 
   if (usesHardwareFrames_) {
     const auto fmts = utils::get_hwframe_transfer_formats(hw_frames_ref);
@@ -130,14 +138,14 @@ void Encoder::openVAAPIDevice(const AVCodec * codec, int width, int height)
   frames_ctx->initial_pool_size = 20;
   if ((err = av_hwframe_ctx_init(hw_frames_ref)) < 0) {
     av_buffer_unref(&hw_frames_ref);
-    utils::throw_err("failed to initialize VAAPI frame context", err);
+    utils::throw_err("failed to initialize hardware frame context", err);
   }
   codecContext_->hw_frames_ctx = av_buffer_ref(hw_frames_ref);
 
   av_buffer_unref(&hw_frames_ref);
 
   if (codecContext_->hw_frames_ctx == nullptr) {
-    throw(std::runtime_error("vaapi: cannot create buffer ref!"));
+    throw(std::runtime_error("hardware decoder: cannot create buffer ref!"));
   }
 }
 
@@ -192,8 +200,11 @@ void Encoder::doOpenCodec(int width, int height)
   codecContext_->gop_size = GOPSize_;
   codecContext_->max_b_frames = maxBFrames_;  // nvenc can only handle zero!
 
-  if (encoder_.find("vaapi") != std::string::npos) {
-    openVAAPIDevice(codec, width, height);
+  const enum AVHWDeviceType hwDevType = utils::find_hw_device_type(codec);
+  if (hwDevType != AV_HWDEVICE_TYPE_NONE) {
+    RCLCPP_INFO_STREAM(
+      logger_, encoder_ << " uses hw device: " << av_hwdevice_get_type_name(hwDevType));
+    openHardwareDevice(codec, hwDevType, width, height);
   }
 
   if (usesHardwareFrames_) {
@@ -220,7 +231,7 @@ void Encoder::doOpenCodec(int width, int height)
     encoder_.c_str(), profile_.c_str(), preset_.c_str(), bitRate_, qmax_);
 
   err = avcodec_open2(codecContext_, codec, NULL);
-  utils::check_for_err("cannot open codec", err);
+  utils::check_for_err("cannot open codec " + encoder_, err);
 
   RCLCPP_INFO_STREAM(logger_, "opened codec: " << encoder_);
   frame_ = av_frame_alloc();
@@ -382,7 +393,7 @@ int Encoder::drainPacket(const Header & header, int width, int height)
     auto it = ptsToStamp_.find(pk.pts);
     if (it != ptsToStamp_.end()) {
       callback_(
-        header.frame_id, it->second, encoder_, width, height, pk.pts, pk.flags, pk.data, pk.size);
+        header.frame_id, it->second, encoding_, width, height, pk.pts, pk.flags, pk.data, pk.size);
       if (measurePerformance_) {
         const auto t3 = rclcpp::Clock().now();
         tdiffPublish_.update((t3 - t2).seconds());

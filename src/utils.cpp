@@ -59,6 +59,17 @@ void check_for_err(const std::string & msg, int errnum)
   }
 }
 
+enum AVHWDeviceType find_hw_device_type(const AVCodec * codec)
+{
+  if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+    const AVCodecHWConfig * config = avcodec_get_hw_config(codec, 0);
+    if (config) {
+      return (config->device_type);
+    }
+  }
+  return (AV_HWDEVICE_TYPE_NONE);
+}
+
 enum AVPixelFormat find_hw_config(
   bool * usesHWFrames, enum AVHWDeviceType hwDevType, const AVCodec * codec)
 {
@@ -87,10 +98,14 @@ static bool has_format(const std::vector<AVPixelFormat> & fmts, const AVPixelFor
 enum AVPixelFormat get_preferred_pixel_format(
   const std::string & encoder, const std::vector<AVPixelFormat> & fmts)
 {
-  // the only format that worked for vaapi was NV12
-  if (encoder.find("vaapi") != std::string::npos) {
-    return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
+  (void)encoder;
+  for (const auto & f : fmts) {
+    std::cout << "format: " << pix(f) << std::endl;
   }
+  // the only format that worked for vaapi was NV12
+  // if (encoder.find("vaapi") != std::string::npos) {
+  //   return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
+  // }
   if (has_format(fmts, AV_PIX_FMT_BGR24)) {
     return (AV_PIX_FMT_BGR24);  // fastest, needs no copy
   }
@@ -135,39 +150,31 @@ std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwfra
       formats.push_back(*f);
     }
   }
+  if (fmts) {
+    av_free(fmts);
+  }
   return (formats);
 }
-
-// This function finds all encodings that are the target of a given
-// encoder. So if encoder == "hevc_nvenc", it will return the set
-// of {id_of(hevc)}
-
-static std::set<AVCodecID> find_encodings_for_encoder(const std::string & encoder)
-{
-  std::set<AVCodecID> encodings;
-  const AVCodecDescriptor * desc = NULL;
-  while ((desc = avcodec_descriptor_next(desc)) != nullptr) {
-    if (desc->name == encoder) {
-      encodings.insert(desc->id);
-    }
-    const AVCodec * c;
-    void * iter = nullptr;
-    while ((c = av_codec_iterate(&iter))) {
-      if (av_codec_is_encoder(c) && c->name == encoder && c->id == desc->id) {
-        encodings.insert(c->id);
-      }
-    }
-  }
-  return (encodings);
-}
-
-static void find_decoders(
-  const std::set<AVCodecID> & encodings, std::vector<std::string> * decoders, bool with_hw_support)
+// find codec by name
+static const AVCodec * find_by_name(const std::string & name)
 {
   const AVCodec * c;
   void * iter = nullptr;
   while ((c = av_codec_iterate(&iter))) {
-    if (av_codec_is_decoder(c) && encodings.find(c->id) != encodings.end()) {
+    if (c->name == name) {
+      return (c);
+    }
+  }
+  return (nullptr);
+}
+
+static void find_decoders(
+  AVCodecID encoding, std::vector<std::string> * decoders, bool with_hw_support)
+{
+  const AVCodec * c;
+  void * iter = nullptr;
+  while ((c = av_codec_iterate(&iter))) {
+    if (av_codec_is_decoder(c) && c->id == encoding) {
       if (with_hw_support) {
         if ((c->capabilities & AV_CODEC_CAP_HARDWARE) && (avcodec_get_hw_config(c, 0) != nullptr)) {
           decoders->push_back(c->name);
@@ -181,15 +188,48 @@ static void find_decoders(
   }
 }
 
+// This function finds the encoding that is the target of a given encoder.
+// of {id_of(hevc)}
+
+static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
+{
+  const AVCodec * c = find_by_name(encoder);
+  if (!c) {
+    const AVCodecDescriptor * desc = NULL;
+    while ((desc = avcodec_descriptor_next(desc)) != nullptr) {
+      if (desc->name == encoder) {
+        return (desc->id);
+      }
+    }
+    throw(std::runtime_error("unknown encoder: " + encoder));
+  }
+  return (c->id);
+}
+
 void find_decoders(
   const std::string & encoding, std::vector<std::string> * hw_decoders,
   std::vector<std::string> * sw_decoders)
 {
   // in case the passed in encoding is actually an encoder...
-  const auto encodings = find_encodings_for_encoder(encoding);
+  const auto real_encoding = find_id_for_encoder_or_encoding(encoding);
   // first use hw accelerated codecs, then software
-  find_decoders(encodings, hw_decoders, true);
-  find_decoders(encodings, sw_decoders, false);
+  find_decoders(real_encoding, hw_decoders, true);
+  find_decoders(real_encoding, sw_decoders, false);
+}
+
+std::string find_encoding(const std::string & encoder)
+{
+  const AVCodec * c = find_by_name(encoder);
+  if (!c) {
+    throw(std::runtime_error("unknown encoder: " + encoder));
+  }
+  const AVCodecDescriptor * desc = NULL;
+  while ((desc = avcodec_descriptor_next(desc)) != nullptr) {
+    if (desc->id == c->id) {
+      return (desc->name);
+    }
+  }
+  throw(std::runtime_error("weird ffmpeg config error???"));
 }
 
 std::vector<std::string> get_hwdevice_types()

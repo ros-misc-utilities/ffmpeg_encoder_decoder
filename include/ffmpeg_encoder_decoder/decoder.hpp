@@ -126,7 +126,7 @@ public:
 
 private:
   rclcpp::Logger logger_;
-  bool initDecoder(const std::string & decoder);
+  bool initSingleDecoder(const std::string & decoder);
   bool initDecoder(const std::vector<std::string> & decoders);
   // --------------- variables
   Callback callback_;

@@ -75,8 +75,17 @@ void find_decoders(
 /**!
 * * get hardware device types
 */
-
 std::vector<std::string> get_hwdevice_types();
+
+/**!
+* find encoding for given encoder
+*/
+std::string find_encoding(const std::string & encoder);
+
+/**!
+* gets hardware device type for specific codec
+*/
+enum AVHWDeviceType find_hw_device_type(const AVCodec * codec);
 
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder
