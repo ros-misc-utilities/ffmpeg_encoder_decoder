@@ -96,16 +96,12 @@ static bool has_format(const std::vector<AVPixelFormat> & fmts, const AVPixelFor
 }
 
 enum AVPixelFormat get_preferred_pixel_format(
-  const std::string & encoder, const std::vector<AVPixelFormat> & fmts)
+  bool useHWFormat, const std::vector<AVPixelFormat> & fmts)
 {
-  (void)encoder;
-  for (const auto & f : fmts) {
-    std::cout << "format: " << pix(f) << std::endl;
+  if (useHWFormat) {
+    // the hardware encoders typically use nv12.
+    return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
   }
-  // the only format that worked for vaapi was NV12
-  // if (encoder.find("vaapi") != std::string::npos) {
-  //   return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
-  // }
   if (has_format(fmts, AV_PIX_FMT_BGR24)) {
     return (AV_PIX_FMT_BGR24);  // fastest, needs no copy
   }

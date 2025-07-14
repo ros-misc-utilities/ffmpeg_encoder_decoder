@@ -137,7 +137,15 @@ public:
   // encode image
   void encodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0);
   void encodeImage(const Image & msg);
-  // flush all packets. Need header to generate callback message
+  /**!
+  * flush all packets (produces callbacks).
+  * \param frame_id the frame id that will be presented on callback
+  */
+  void flush(const std::string & frame_id);
+  /**!
+  * flush all packets (produces callbacks).
+  * \deprecated Only header.frame_id is used. Used flush(frame_id) now.
+  */
   void flush(const Header & header);
 
   /**!
@@ -155,7 +163,7 @@ private:
   bool openCodec(int width, int height);
   void doOpenCodec(int width, int height);
   void closeCodec();
-  int drainPacket(const Header & hdr, int width, int height);
+  int drainPacket(const std::string & frame_id, int width, int height);
   AVPixelFormat pixelFormat(const std::string & f) const;
   void openHardwareDevice(
     const AVCodec * codec, enum AVHWDeviceType hwDevType, int width, int height);

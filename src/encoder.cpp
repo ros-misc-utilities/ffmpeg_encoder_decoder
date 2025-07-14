@@ -117,7 +117,7 @@ void Encoder::openHardwareDevice(
 
   if (usesHardwareFrames_) {
     const auto fmts = utils::get_hwframe_transfer_formats(hw_frames_ref);
-    frames_ctx->sw_format = utils::get_preferred_pixel_format("h264_vaapi", fmts);
+    frames_ctx->sw_format = utils::get_preferred_pixel_format(true, fmts);
     if (pixFormat_ != AV_PIX_FMT_NONE) {
       RCLCPP_INFO_STREAM(
         logger_, "user overriding software pix fmt " << utils::pix(frames_ctx->sw_format));
@@ -215,7 +215,7 @@ void Encoder::doOpenCodec(int width, int height)
   } else {
     codecContext_->pix_fmt = (pixFormat_ != AV_PIX_FMT_NONE)
                                ? pixFormat_
-                               : utils::get_preferred_pixel_format(encoder_, pixFmts);
+                               : utils::get_preferred_pixel_format(false, pixFmts);
     codecContext_->sw_pix_fmt = codecContext_->pix_fmt;
   }
 
@@ -346,14 +346,13 @@ void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclc
   }
 
   ret = avcodec_send_frame(codecContext_, usesHardwareFrames_ ? hw_frame_ : frame_);
-
   if (measurePerformance_) {
     t3 = rclcpp::Clock().now();
     tdiffSendFrame_.update((t3 - t2).seconds());
   }
   // now drain all packets
   while (ret == 0) {
-    ret = drainPacket(header, img.cols, img.rows);
+    ret = drainPacket(header.frame_id, img.cols, img.rows);
   }
   if (measurePerformance_) {
     const rclcpp::Time t4 = rclcpp::Clock().now();
@@ -361,18 +360,20 @@ void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclc
   }
 }
 
-void Encoder::flush(const Header & header)
+void Encoder::flush(const std::string & frame_id)
 {
   if (!frame_) {
     return;
   }
   int ret = avcodec_send_frame(codecContext_, nullptr);
   while (ret == 0) {
-    ret = drainPacket(header, frame_->width, frame_->height);
+    ret = drainPacket(frame_id, frame_->width, frame_->height);
   }
 }
 
-int Encoder::drainPacket(const Header & header, int width, int height)
+void Encoder::flush(const Header & header) { flush(header.frame_id); }
+
+int Encoder::drainPacket(const std::string & frame_id, int width, int height)
 {
   rclcpp::Time t0, t1, t2;
   if (measurePerformance_) {
@@ -392,8 +393,7 @@ int Encoder::drainPacket(const Header & header, int width, int height)
     }
     auto it = ptsToStamp_.find(pk.pts);
     if (it != ptsToStamp_.end()) {
-      callback_(
-        header.frame_id, it->second, encoding_, width, height, pk.pts, pk.flags, pk.data, pk.size);
+      callback_(frame_id, it->second, encoding_, width, height, pk.pts, pk.flags, pk.data, pk.size);
       if (measurePerformance_) {
         const auto t3 = rclcpp::Clock().now();
         tdiffPublish_.update((t3 - t2).seconds());

@@ -62,8 +62,8 @@ std::vector<enum AVPixelFormat> get_encoder_formats(
 /**!
 * picks from a vector of formats the "best" pixel format for a given encoder
 */
-enum AVPixelFormat get_preferred_pixel_format(
-  const std::string & encoder, const std::vector<AVPixelFormat> & fmts);
+enum AVPixelFormat get_preferred_pixel_format(bool useHWFormat,
+  const std::vector<AVPixelFormat> & fmts);
 
 /**!
 * finds the names of all available decoders for a given encoding (or encoder)
