@@ -44,27 +44,90 @@ public:
 
   Decoder();
   ~Decoder();
+  /**
+   * Test if decoder is initialized.
+   * @return true if the decoder is initialized.
+   */
   bool isInitialized() const { return (codecContext_ != NULL); }
-  // Initialize decoder upon first packet received,
-  // providing callback to be called when frame is complete.
-  // You must still call decodePacket(msg) afterward!
-  bool initialize(const std::string & encoding, Callback callback, const std::string & dec);
-  // clears all state, but leaves config intact
+  /**
+   * Initialize decoder, with multiple decoders to pick from.
+  *  Will pick hardware accelerated decoders first if available.
+  * If decoders.empty() a default decoder will be chosen (if available).
+  * @param encoding the encoding from the first packet. Can never change!
+  * @param callback the function to call when frame has been decoded
+  * @param decoder the decoder to use. If empty string,
+  *                 the decoder will try to find a suitable one based on the encoding
+  * @return true if successful
+  */
+
+  bool initialize(const std::string & encoding, Callback callback, const std::string & decoder);
+  /**
+   * Initialize decoder with multiple decoders to pick from.
+  *  Will pick hardware accelerated decoders first if available.
+  * If decoders.empty() a default decoder will be chosen (if available).
+  * @param encoding the encoding from the first packet. Can never change!
+  * @param callback the function to call when frame has been decoded
+  * @param decoders the set of decoders to try sequentially. If empty()
+  *                 the decoder will try to find a suitable one based on the encoding
+  * @return true if successful
+  */
+  bool initialize(
+    const std::string & encoding, Callback callback, const std::vector<std::string> & decoders);
+  /**
+   * Clears all decoder state but not timers, loggers, and other settings.
+   */
   void reset();
-  // decode packet (may result in frame callback!)
+  /**
+   * Decodes packet. Decoder must have been initialized beforehand. Calling this
+   * function may result in callback with decoded frame.
+   * @param encoding  the name of the encoding (typically from msg encoding)
+   * @param data pointer to packet data
+   * @param size size of packet data
+   * @param pts presentation time stamp of data packet
+   * @param frame_id ros frame id (from message header)
+   * @param stamp ros message header time stamp
+  */
   bool decodePacket(
     const std::string & encoding, const uint8_t * data, size_t size, uint64_t pts,
     const std::string & frame_id, const rclcpp::Time & stamp);
-
-  void setMeasurePerformance(bool p) { measurePerformance_ = p; }
-  void printTimers(const std::string & prefix) const;
-  void resetTimers();
+  /**
+   * Override default logger
+   * @param logger the logger to override the default with
+  */
   void setLogger(rclcpp::Logger logger) { logger_ = logger; }
+  /**
+   * deprecated, don't use!
+   */
   static const std::unordered_map<std::string, std::string> & getDefaultEncoderToDecoderMap();
+  /**
+   *  Finds the name of hardware and software decoders that match a
+   *  certain encoding (or encoder)
+   */
+  static void findDecoders(
+    const std::string & encoding, std::vector<std::string> * hw_decoders,
+    std::vector<std::string> * sw_decoders);
+  /**
+     * Finds the name of all hardware and software decoders that match
+     * a certain encoding (or encoder)
+     */
+  static std::vector<std::string> findDecoders(const std::string & encoding);
+  /**
+   * For performance debugging
+   */
+  void setMeasurePerformance(bool p) { measurePerformance_ = p; }
+  /**
+   * For performance debugging
+   */
+  void printTimers(const std::string & prefix) const;
+  /**
+   * For performance debugging
+   */
+  void resetTimers();
 
 private:
   rclcpp::Logger logger_;
-  bool initDecoder(const std::string & encoding, const std::string & decoder);
+  bool initSingleDecoder(const std::string & decoder);
+  bool initDecoder(const std::vector<std::string> & decoders);
   // --------------- variables
   Callback callback_;
   PTSMap ptsToStamp_;  // mapping of header

@@ -16,6 +16,7 @@
 #ifndef FFMPEG_ENCODER_DECODER__UTILS_HPP_
 #define FFMPEG_ENCODER_DECODER__UTILS_HPP_
 
+#include <map>
 #include <opencv2/core.hpp>
 #include <string>
 #include <vector>
@@ -62,7 +63,29 @@ std::vector<enum AVPixelFormat> get_encoder_formats(
 * picks from a vector of formats the "best" pixel format for a given encoder
 */
 enum AVPixelFormat get_preferred_pixel_format(
-  const std::string & encoder, const std::vector<AVPixelFormat> & fmts);
+  bool useHWFormat, const std::vector<AVPixelFormat> & fmts);
+
+/**!
+* finds the names of all available decoders for a given encoding (or encoder)
+*/
+void find_decoders(
+  const std::string & encoding, std::vector<std::string> * hw_decoders,
+  std::vector<std::string> * sw_decoders);
+
+/**!
+* * get hardware device types
+*/
+std::vector<std::string> get_hwdevice_types();
+
+/**!
+* find encoding for given encoder
+*/
+std::string find_encoding(const std::string & encoder);
+
+/**!
+* gets hardware device type for specific codec
+*/
+enum AVHWDeviceType find_hw_device_type(const AVCodec * codec);
 
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder

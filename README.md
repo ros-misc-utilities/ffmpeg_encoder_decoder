@@ -79,6 +79,10 @@ nvmpi like so:
                      'ffmpeg_image_transport.preset': 'll',
                      'ffmpeg_image_transport.gop_size': 15}]
 ```
+Sometimes the ffmpeg parameters show up under different names. If the above
+settings don't work, try the command ``ros2 param dump <name_of_your_node>``
+*after* subscribing to the ffmpeg image topic with e.g. ``ros2 topic hz``.
+From the output you can see what the correct parameter names are.
 ## License
 
 This software is issued under the Apache License Version 2.0.
