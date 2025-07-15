@@ -16,8 +16,10 @@
 #include <algorithm>
 #include <ffmpeg_encoder_decoder/utils.hpp>
 #include <iostream>
+#include <map>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <set>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -57,6 +59,17 @@ void check_for_err(const std::string & msg, int errnum)
   }
 }
 
+enum AVHWDeviceType find_hw_device_type(const AVCodec * codec)
+{
+  if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+    const AVCodecHWConfig * config = avcodec_get_hw_config(codec, 0);
+    if (config) {
+      return (config->device_type);
+    }
+  }
+  return (AV_HWDEVICE_TYPE_NONE);
+}
+
 enum AVPixelFormat find_hw_config(
   bool * usesHWFrames, enum AVHWDeviceType hwDevType, const AVCodec * codec)
 {
@@ -83,10 +96,10 @@ static bool has_format(const std::vector<AVPixelFormat> & fmts, const AVPixelFor
 }
 
 enum AVPixelFormat get_preferred_pixel_format(
-  const std::string & encoder, const std::vector<AVPixelFormat> & fmts)
+  bool useHWFormat, const std::vector<AVPixelFormat> & fmts)
 {
-  // the only format that worked for vaapi was NV12
-  if (encoder.find("vaapi") != std::string::npos) {
+  if (useHWFormat) {
+    // the hardware encoders typically use nv12.
     return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
   }
   if (has_format(fmts, AV_PIX_FMT_BGR24)) {
@@ -133,8 +146,96 @@ std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwfra
       formats.push_back(*f);
     }
   }
+  if (fmts) {
+    av_free(fmts);
+  }
   return (formats);
 }
+// find codec by name
+static const AVCodec * find_by_name(const std::string & name)
+{
+  const AVCodec * c;
+  void * iter = nullptr;
+  while ((c = av_codec_iterate(&iter))) {
+    if (c->name == name) {
+      return (c);
+    }
+  }
+  return (nullptr);
+}
 
+static void find_decoders(
+  AVCodecID encoding, std::vector<std::string> * decoders, bool with_hw_support)
+{
+  const AVCodec * c;
+  void * iter = nullptr;
+  while ((c = av_codec_iterate(&iter))) {
+    if (av_codec_is_decoder(c) && c->id == encoding) {
+      if (with_hw_support) {
+        if ((c->capabilities & AV_CODEC_CAP_HARDWARE) && (avcodec_get_hw_config(c, 0) != nullptr)) {
+          decoders->push_back(c->name);
+        }
+      } else {
+        if (!(c->capabilities & AV_CODEC_CAP_HARDWARE)) {
+          decoders->push_back(c->name);
+        }
+      }
+    }
+  }
+}
+
+// This function finds the encoding that is the target of a given encoder.
+// of {id_of(hevc)}
+
+static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
+{
+  const AVCodec * c = find_by_name(encoder);
+  if (!c) {
+    const AVCodecDescriptor * desc = NULL;
+    while ((desc = avcodec_descriptor_next(desc)) != nullptr) {
+      if (desc->name == encoder) {
+        return (desc->id);
+      }
+    }
+    throw(std::runtime_error("unknown encoder: " + encoder));
+  }
+  return (c->id);
+}
+
+void find_decoders(
+  const std::string & encoding, std::vector<std::string> * hw_decoders,
+  std::vector<std::string> * sw_decoders)
+{
+  // in case the passed in encoding is actually an encoder...
+  const auto real_encoding = find_id_for_encoder_or_encoding(encoding);
+  // first use hw accelerated codecs, then software
+  find_decoders(real_encoding, hw_decoders, true);
+  find_decoders(real_encoding, sw_decoders, false);
+}
+
+std::string find_encoding(const std::string & encoder)
+{
+  const AVCodec * c = find_by_name(encoder);
+  if (!c) {
+    throw(std::runtime_error("unknown encoder: " + encoder));
+  }
+  const AVCodecDescriptor * desc = NULL;
+  while ((desc = avcodec_descriptor_next(desc)) != nullptr) {
+    if (desc->id == c->id) {
+      return (desc->name);
+    }
+  }
+  throw(std::runtime_error("weird ffmpeg config error???"));
+}
+
+std::vector<std::string> get_hwdevice_types()
+{
+  std::vector<std::string> types;
+  for (enum AVHWDeviceType type = av_hwdevice_iterate_types(AV_HWDEVICE_TYPE_NONE);
+       type != AV_HWDEVICE_TYPE_NONE; type = av_hwdevice_iterate_types(type)) {
+    types.push_back(av_hwdevice_get_type_name(type));
+  }
+  return (types);
+}
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder

@@ -50,11 +50,8 @@ public:
   Encoder();
   ~Encoder();
   // ------- various encoding settings
-  void setEncoder(const std::string & n)
-  {
-    Lock lock(mutex_);
-    encoder_ = n;
-  }
+  void setEncoder(const std::string & n);
+
   void setProfile(const std::string & p)
   {
     Lock lock(mutex_);
@@ -105,6 +102,16 @@ public:
     Lock lock(mutex_);
     GOPSize_ = g;
   }
+  int getMaxBFrames() const
+  {
+    Lock lock(mutex_);
+    return (maxBFrames_);
+  }
+  void setMaxBFrames(int b)
+  {
+    Lock lock(mutex_);
+    maxBFrames_ = b;
+  }
   void setFrameRate(int frames, int second)
   {
     Lock lock(mutex_);
@@ -130,8 +137,22 @@ public:
   // encode image
   void encodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0);
   void encodeImage(const Image & msg);
-  // flush all packets. Need header to generate callback message
+  /**!
+  * flush all packets (produces callbacks).
+  * \param frame_id the frame id that will be presented on callback
+  */
+  void flush(const std::string & frame_id);
+  /**!
+  * flush all packets (produces callbacks).
+  * \deprecated Only header.frame_id is used. Used flush(frame_id) now.
+  */
   void flush(const Header & header);
+
+  /**!
+   * finds the encoding for a given encoder, i.e. returns h264 for h264_vaapi
+   */
+  static std::string findEncoding(const std::string & encoder);
+
   // ------- performance statistics
   void printTimers(const std::string & prefix) const;
   void resetTimers();
@@ -142,27 +163,31 @@ private:
   bool openCodec(int width, int height);
   void doOpenCodec(int width, int height);
   void closeCodec();
-  int drainPacket(const Header & hdr, int width, int height);
+  int drainPacket(const std::string & frame_id, int width, int height);
   AVPixelFormat pixelFormat(const std::string & f) const;
-  void openVAAPIDevice(const AVCodec * codec, int width, int height);
+  void openHardwareDevice(
+    const AVCodec * codec, enum AVHWDeviceType hwDevType, int width, int height);
   void setAVOption(const std::string & field, const std::string & value);
   // --------- variables
   rclcpp::Logger logger_;
   mutable std::recursive_mutex mutex_;
   Callback callback_;
   // config
-  std::string encoder_;  // e.g. "libx264"
-  std::string preset_;   // e.g. "slow", "medium", "lossless"
-  std::string profile_;  // e.g. "main", "high", "rext"
-  std::string tune_;     // e.g. "tune"
-  std::string delay_;    // default is 4 frames for parallel processing. 0 is lowest latency
-  std::string crf_;      // constant rate factor. 0 is lossless, 51 is worst quality
-  int qmax_{0};          // max allowed quantization. The lower the better quality
-  int GOPSize_{15};      // distance between two keyframes
+  std::string encoder_;   // e.g. "libx264"
+  std::string encoding_;  // e.g. "h264"
+  std::string preset_;    // e.g. "slow", "medium", "lossless"
+  std::string profile_;   // e.g. "main", "high", "rext"
+  std::string tune_;      // e.g. "tune"
+  std::string delay_;     // default is 4 frames for parallel processing. 0 is lowest latency
+  std::string crf_;       // constant rate factor. 0 is lossless, 51 is worst quality
+  int qmax_{-1};          // max allowed quantization. The lower the better quality
+  int GOPSize_{-1};       // distance between two keyframes
+  int maxBFrames_{-1};    // maximum number of b-frames
+  int64_t bitRate_{0};    // max rate in bits/s
+
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
-  int64_t bitRate_{1000000};
   bool usesHardwareFrames_{false};
   // ------ libav state
   AVCodecContext * codecContext_{nullptr};

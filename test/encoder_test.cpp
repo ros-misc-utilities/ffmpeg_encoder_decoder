@@ -21,6 +21,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 
 static const char * g_codec = "libx264";
+static const char * g_encoding = "h264";
 static const char * g_frame_id = "frame_id";
 static const int g_width = 1920;  // must be mult of 64 for some codecs!
 static const int g_height = 1080;
@@ -39,7 +40,7 @@ void packetReady(
   EXPECT_EQ(static_cast<int>(width), g_width);
   EXPECT_EQ(static_cast<int>(height), g_height);
   EXPECT_EQ(frame_id, g_frame_id);
-  EXPECT_EQ(codec, g_codec);
+  EXPECT_EQ(codec, g_encoding);
   g_frame_counter++;
 }
 
