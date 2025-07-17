@@ -47,8 +47,10 @@ void Encoder::setEncoder(const std::string & n)
 {
   Lock lock(mutex_);
   encoder_ = n;
-  encoding_ = utils::find_encoding(encoder_);
+  codec_ = utils::find_codec(encoder_);
 }
+
+std::string Encoder::findCodec(const std::string & encoder) { return (utils::find_codec(encoder)); }
 
 static void free_frame(AVFrame ** frame)
 {
@@ -117,7 +119,7 @@ void Encoder::openHardwareDevice(
 
   if (usesHardwareFrames_) {
     const auto fmts = utils::get_hwframe_transfer_formats(hw_frames_ref);
-    frames_ctx->sw_format = utils::get_preferred_pixel_format(true, fmts);
+    frames_ctx->sw_format = utils::get_preferred_pixel_format(usesHardwareFrames_, fmts);
     if (pixFormat_ != AV_PIX_FMT_NONE) {
       RCLCPP_INFO_STREAM(
         logger_, "user overriding software pix fmt " << utils::pix(frames_ctx->sw_format));
@@ -215,20 +217,17 @@ void Encoder::doOpenCodec(int width, int height)
   } else {
     codecContext_->pix_fmt = (pixFormat_ != AV_PIX_FMT_NONE)
                                ? pixFormat_
-                               : utils::get_preferred_pixel_format(false, pixFmts);
+                               : utils::get_preferred_pixel_format(!usesHardwareFrames_, pixFmts);
     codecContext_->sw_pix_fmt = codecContext_->pix_fmt;
   }
-
-  setAVOption("profile", profile_);
-  setAVOption("preset", preset_);
-  setAVOption("tune", tune_);
-  setAVOption("delay", delay_);
-  setAVOption("crf", crf_);
-  RCLCPP_DEBUG(
-    logger_,
-    "codec: %10s, profile: %10s, preset: %10s,"
-    " bit_rate: %10ld qmax: %2d",
-    encoder_.c_str(), profile_.c_str(), preset_.c_str(), bitRate_, qmax_);
+  std::stringstream ss;
+  for (const auto & kv : avOptions_) {
+    setAVOption(kv.first, kv.second);
+    ss << " " << kv.first << "=" << kv.second;
+  }
+  RCLCPP_INFO(
+    logger_, "codec: %10s, bit_rate: %10ld qmax: %2d options: %s", encoder_.c_str(), bitRate_,
+    qmax_, ss.str().c_str());
 
   err = avcodec_open2(codecContext_, codec, NULL);
   utils::check_for_err("cannot open codec " + encoder_, err);
@@ -269,13 +268,13 @@ void Encoder::doOpenCodec(int width, int height)
   wrapperFrame_ = av_frame_alloc();
   wrapperFrame_->width = width;
   wrapperFrame_->height = height;
-  wrapperFrame_->format = AV_PIX_FMT_BGR24;
+  wrapperFrame_->format = utils::ros_to_av_pix_format(cvBridgeTargetFormat_);
 
   // initialize format conversion library
   if (!swsContext_) {
     swsContext_ = sws_getContext(
-      width, height, AV_PIX_FMT_BGR24,                            // src
-      width, height, static_cast<AVPixelFormat>(frame_->format),  // dest
+      width, height, static_cast<AVPixelFormat>(wrapperFrame_->format),  // src
+      width, height, static_cast<AVPixelFormat>(frame_->format),         // dest
       SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
     if (!swsContext_) {
       throw(std::runtime_error("cannot allocate sws context"));
@@ -301,11 +300,8 @@ void Encoder::encodeImage(const Image & msg)
   if (measurePerformance_) {
     t0 = rclcpp::Clock().now();
   }
-  // TODO(Bernd): forcing the encoding to be BGR8 is wasteful when
-  // the encoder supports monochrome.
-
-  cv::Mat img = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8)->image;
-  encodeImage(img, msg.header, t0);
+  cv::Mat img = cv_bridge::toCvCopy(msg, cvBridgeTargetFormat_)->image;
+  doEncodeImage(img, msg.header, t0);
   if (measurePerformance_) {
     const auto t1 = rclcpp::Clock().now();
     tdiffDebayer_.update((t1 - t0).seconds());
@@ -313,6 +309,11 @@ void Encoder::encodeImage(const Image & msg)
 }
 
 void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0)
+{
+  doEncodeImage(img, header, t0);
+}
+
+void Encoder::doEncodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0)
 {
   Lock lock(mutex_);
   rclcpp::Time t1, t2, t3;
@@ -336,7 +337,7 @@ void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclc
   }
 
   frame_->pts = pts_++;  //
-  ptsToStamp_.insert(PTSMap::value_type(frame_->pts, header.stamp));
+  ptsToStamp_.insert(PTSMap::value_type(frame_->pts, {header.stamp, header.frame_id}));
 
   int ret;
   if (usesHardwareFrames_) {
@@ -352,7 +353,7 @@ void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclc
   }
   // now drain all packets
   while (ret == 0) {
-    ret = drainPacket(header.frame_id, img.cols, img.rows);
+    ret = drainPacket(img.cols, img.rows);
   }
   if (measurePerformance_) {
     const rclcpp::Time t4 = rclcpp::Clock().now();
@@ -360,20 +361,20 @@ void Encoder::encodeImage(const cv::Mat & img, const Header & header, const rclc
   }
 }
 
-void Encoder::flush(const std::string & frame_id)
+void Encoder::flush()
 {
   if (!frame_) {
     return;
   }
   int ret = avcodec_send_frame(codecContext_, nullptr);
   while (ret == 0) {
-    ret = drainPacket(frame_id, frame_->width, frame_->height);
+    ret = drainPacket(frame_->width, frame_->height);
   }
 }
 
-void Encoder::flush(const Header & header) { flush(header.frame_id); }
+void Encoder::flush(const Header &) { flush(); }
 
-int Encoder::drainPacket(const std::string & frame_id, int width, int height)
+int Encoder::drainPacket(int width, int height)
 {
   rclcpp::Time t0, t1, t2;
   if (measurePerformance_) {
@@ -393,7 +394,8 @@ int Encoder::drainPacket(const std::string & frame_id, int width, int height)
     }
     auto it = ptsToStamp_.find(pk.pts);
     if (it != ptsToStamp_.end()) {
-      callback_(frame_id, it->second, encoding_, width, height, pk.pts, pk.flags, pk.data, pk.size);
+      const auto & pe = it->second;
+      callback_(pe.frame_id, pe.time, codec_, width, height, pk.pts, pk.flags, pk.data, pk.size);
       if (measurePerformance_) {
         const auto t3 = rclcpp::Clock().now();
         tdiffPublish_.update((t3 - t2).seconds());

@@ -25,7 +25,7 @@
 namespace ffmpeg_encoder_decoder
 {
 
-Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) {}
+Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) { setOutputMessageEncoding("bgr8"); }
 
 Decoder::~Decoder() { reset(); }
 
@@ -42,13 +42,25 @@ void Decoder::reset()
   if (hwDeviceContext_) {
     av_buffer_unref(&hwDeviceContext_);
   }
-  av_free(decodedFrame_);
-  decodedFrame_ = NULL;
+  av_free(swFrame_);
+  swFrame_ = NULL;
   av_free(cpuFrame_);
   cpuFrame_ = NULL;
-  av_free(colorFrame_);
-  colorFrame_ = NULL;
+  av_free(outputFrame_);
+  outputFrame_ = NULL;
   hwPixFormat_ = AV_PIX_FMT_NONE;
+}
+
+void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
+{
+  outputMsgEncoding_ = output_encoding;
+  outputAVPixFormat_ = utils::ros_to_av_pix_format(output_encoding);
+  const AVPixFmtDescriptor * pd = av_pix_fmt_desc_get(outputAVPixFormat_);
+  if (!pd) {
+    RCLCPP_ERROR_STREAM(logger_, "cannot find pixel format descriptor for " << output_encoding);
+    throw(std::runtime_error("cannot find format descriptor!"));
+  }
+  bitsPerPixel_ = av_get_padded_bits_per_pixel(pd);
 }
 
 bool Decoder::initialize(
@@ -110,7 +122,13 @@ static enum AVPixelFormat find_pix_format(enum AVHWDeviceType hwDevType, const A
   return (AV_PIX_FMT_NONE);
 }
 
-// This function is a adapted version of avcodec_default_get_format
+// This function is an adapted version of avcodec_default_get_format()
+//
+// In the ffmpeg executable, the matching between input and output formats
+// when transcoding is a complex process, with filters inserted between
+// sink and source that rescale and reformat the images. This get_format()
+// function tries to provide some of the functionality without lifting
+// large parts of the code base from the ffmpeg tool.
 
 enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelFormat * fmt)
 {
@@ -149,11 +167,6 @@ enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelF
       }
     }
   }
-  // No device or other setup, so we have to choose from things which
-  // don't any other external information.
-
-  // If the last element of the list is a software format, choose it
-  // (this should be best software format if any exist).
 
   for (n = 0; fmt[n] != AV_PIX_FMT_NONE; n++) {
   }
@@ -185,7 +198,7 @@ enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelF
       return fmt[n];
     }
     if (config->methods & AV_CODEC_HW_CONFIG_METHOD_INTERNAL) {
-// Usable with only internal setup.
+      // Usable with only internal setup.
 #ifdef DEBUG_PIXEL_FORMAT
       av_get_pix_fmt_string(buf, sizeof(buf) - 1, fmt[n]);
       printf("handle with internal setup %d = %s\n", fmt[n], buf);
@@ -238,7 +251,6 @@ bool Decoder::initDecoder(const std::vector<std::string> & decoders)
 bool Decoder::initSingleDecoder(const std::string & decoder)
 {
   try {
-    // utils::get_decoders_for_encoding();  // initialize the map
     const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
     if (!codec) {
       RCLCPP_ERROR_STREAM(logger_, "cannot find decoder " << decoder);
@@ -279,12 +291,13 @@ bool Decoder::initSingleDecoder(const std::string & decoder)
       av_free(codecContext_);
       codecContext_ = NULL;
       codec = NULL;
+      hwPixFormat_ = AV_PIX_FMT_NONE;
       throw(std::runtime_error("open context failed for " + decoder));
     }
-    decodedFrame_ = av_frame_alloc();
+    swFrame_ = av_frame_alloc();
     cpuFrame_ = (hwPixFormat_ == AV_PIX_FMT_NONE) ? NULL : av_frame_alloc();
-    colorFrame_ = av_frame_alloc();
-    colorFrame_->format = AV_PIX_FMT_BGR24;
+    outputFrame_ = av_frame_alloc();
+    outputFrame_->format = outputAVPixFormat_;
   } catch (const std::runtime_error & e) {
     RCLCPP_ERROR_STREAM(logger_, e.what());
     reset();
@@ -294,10 +307,98 @@ bool Decoder::initSingleDecoder(const std::string & decoder)
   return (true);
 }
 
+bool Decoder::flush()
+{
+  if (!codecContext_) {
+    return (false);
+  }
+  int ret = avcodec_send_packet(codecContext_, nullptr);
+  if (ret != 0) {
+    RCLCPP_WARN_STREAM(logger_, "failed to send flush packet!");
+    return (false);
+  }
+  // receive frames until decoder buffer is empty or error occurs.
+  // this may trigger frame callbacks.
+  while ((ret = receiveFrame()) == 0) {
+    // will return 0, EAGAIN, EOF, or other error
+  }
+  if (ret != AVERROR_EOF) {
+    RCLCPP_WARN_STREAM(logger_, "decoder flush failed with error");
+    return (false);
+  }
+  return (true);
+}
+
+int Decoder::receiveFrame()
+{
+  auto & ctx = codecContext_;  // shorthand
+  const int ret = avcodec_receive_frame(ctx, swFrame_);
+  if (ret != 0) {
+    return (ret);
+  }
+  const bool isAcc = swFrame_->format == hwPixFormat_;
+  if (isAcc) {
+    int ret2 = av_hwframe_transfer_data(cpuFrame_, swFrame_, 0);
+    if (ret2 < 0) {
+      RCLCPP_WARN_STREAM(
+        logger_, "hardware frame transfer failed for pixel format " << utils::pix(hwPixFormat_));
+      return (AVERROR_INVALIDDATA);
+    }
+  }
+  AVFrame * frame = isAcc ? cpuFrame_ : swFrame_;
+
+  if (frame->width != 0) {
+    // convert image to something palatable
+    if (!swsContext_) {
+      swsContext_ = sws_getContext(
+        ctx->width, ctx->height, (AVPixelFormat)frame->format,         // src
+        ctx->width, ctx->height, (AVPixelFormat)outputFrame_->format,  // dest
+        SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+      if (!swsContext_) {
+        RCLCPP_ERROR(logger_, "cannot allocate sws context!!!!");
+        return (AVERROR_BUFFER_TOO_SMALL);
+      }
+    }
+    // prepare the decoded message
+    ImagePtr image(new Image());
+    image->height = frame->height;
+    image->width = frame->width;
+    image->step = (image->width * bitsPerPixel_) / 8;  // is this correct for weird formats?
+    image->encoding = outputMsgEncoding_;
+    image->data.resize(image->step * image->height);
+
+    // bend the memory pointers in outputFrame_ to the right locations
+    av_image_fill_arrays(
+      outputFrame_->data, outputFrame_->linesize, &(image->data[0]),
+      static_cast<AVPixelFormat>(outputFrame_->format), frame->width, frame->height, 1);
+    sws_scale(
+      swsContext_, frame->data, frame->linesize, 0,              // src
+      ctx->height, outputFrame_->data, outputFrame_->linesize);  // dest
+    auto it = ptsToStamp_.find(swFrame_->pts);
+    if (it == ptsToStamp_.end()) {
+      RCLCPP_ERROR_STREAM(logger_, "cannot find pts that matches " << swFrame_->pts);
+    } else {
+      image->header.frame_id = it->second.frame_id;
+      image->header.stamp = it->second.time;
+      ptsToStamp_.erase(it);
+#ifdef USE_AV_FLAGS
+      callback_(image, swFrame_->flags || AV_FRAME_FLAG_KEY);  // deliver callback
+#else
+      callback_(image, swFrame_->key_frame);  // deliver callback
+#endif
+    }
+  }
+  return (ret);
+}
+
 bool Decoder::decodePacket(
   const std::string & encoding, const uint8_t * data, size_t size, uint64_t pts,
   const std::string & frame_id, const rclcpp::Time & stamp)
 {
+  if (!isInitialized()) {
+    RCLCPP_ERROR_STREAM(logger_, "decoder is not initialized!");
+    return (false);
+  }
   rclcpp::Time t0;
   if (measurePerformance_) {
     t0 = rclcpp::Clock().now();
@@ -313,65 +414,20 @@ bool Decoder::decodePacket(
   memcpy(packet->data, data, size);
   packet->pts = pts;
   packet->dts = packet->pts;
-  ptsToStamp_[packet->pts] = stamp;
+
+  ptsToStamp_.insert(PTSMap::value_type(packet->pts, {stamp, frame_id}));
+
   int ret = avcodec_send_packet(ctx, packet);
   if (ret != 0) {
     RCLCPP_WARN_STREAM(logger_, "send_packet failed for pts: " << pts);
     av_packet_unref(packet);
     return (false);
   }
-  ret = avcodec_receive_frame(ctx, decodedFrame_);
-  const bool isAcc = (ret == 0) && (decodedFrame_->format == hwPixFormat_);
-  if (isAcc) {
-    ret = av_hwframe_transfer_data(cpuFrame_, decodedFrame_, 0);
-    if (ret < 0) {
-      RCLCPP_WARN_STREAM(logger_, "failed to transfer data from GPU->CPU");
-      av_packet_unref(packet);
-      return (false);
-    }
-  }
-  AVFrame * frame = isAcc ? cpuFrame_ : decodedFrame_;
-
-  if (ret == 0 && frame->width != 0) {
-    // convert image to something palatable
-    if (!swsContext_) {
-      swsContext_ = sws_getContext(
-        ctx->width, ctx->height, (AVPixelFormat)frame->format,        // src
-        ctx->width, ctx->height, (AVPixelFormat)colorFrame_->format,  // dest
-        SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
-      if (!swsContext_) {
-        RCLCPP_ERROR(logger_, "cannot allocate sws context!!!!");
-        return (false);
-      }
-    }
-    // prepare the decoded message
-    ImagePtr image(new Image());
-    image->height = frame->height;
-    image->width = frame->width;
-    image->step = image->width * 3;  // 3 bytes per pixel
-    image->encoding = sensor_msgs::image_encodings::BGR8;
-    image->data.resize(image->step * image->height);
-
-    // bend the memory pointers in colorFrame to the right locations
-    av_image_fill_arrays(
-      colorFrame_->data, colorFrame_->linesize, &(image->data[0]),
-      (AVPixelFormat)colorFrame_->format, frame->width, frame->height, 1);
-    sws_scale(
-      swsContext_, frame->data, frame->linesize, 0,            // src
-      ctx->height, colorFrame_->data, colorFrame_->linesize);  // dest
-    auto it = ptsToStamp_.find(decodedFrame_->pts);
-    if (it == ptsToStamp_.end()) {
-      RCLCPP_ERROR_STREAM(logger_, "cannot find pts that matches " << decodedFrame_->pts);
-    } else {
-      image->header.frame_id = frame_id;
-      image->header.stamp = it->second;
-      ptsToStamp_.erase(it);
-#ifdef USE_AV_FLAGS
-      callback_(image, decodedFrame_->flags || AV_FRAME_FLAG_KEY);  // deliver callback
-#else
-      callback_(image, decodedFrame_->key_frame);  // deliver callback
-#endif
-    }
+  int rret{0};
+  // return value of 0 means got frame,
+  // EAGAIN means there are no more frames
+  while ((rret = receiveFrame()) == 0) {
+    // keep polling for frames as long as there are any
   }
   av_packet_unref(packet);
   av_packet_free(&packet);
@@ -380,7 +436,7 @@ bool Decoder::decodePacket(
     double dt = (t1 - t0).seconds();
     tdiffTotal_.update(dt);
   }
-  return (true);
+  return (rret == AVERROR(EAGAIN));
 }
 
 void Decoder::resetTimers() { tdiffTotal_.reset(); }
