@@ -29,63 +29,112 @@ namespace ffmpeg_encoder_decoder
 {
 namespace utils
 {
-/**!
-* convert av pixel format to clear text string
-*/
+/**
+ * \brief Convert av pixel format to clear text string.
+ * \return string with name of pixel format
+ */
 std::string pix(const AVPixelFormat & f);
-/**!
-* convert av error number to string
-*/
+
+/**
+ * \brief Convert av error number to string.
+ * \param errnum libav error number
+ * \return clear text string with error message
+ */
 std::string err(int errnum);
-/**!
-* throws runtime_error() with decoded av error string
-*/
+
+/**
+ * \brief throws runtime_error() with decoded av error string
+ * \param msg message (free form text)
+ * \param errnum libav error number
+ */
 void throw_err(const std::string & msg, int errnum);
-/**!
-* checks for error and throws runtime_error() with av error string
-*/
+
+/**
+ * \brief checks for error and throws runtime_error() with av error string
+ * \param msg error message (free form)
+ * \param errnum libav error number
+ */
 void check_for_err(const std::string & msg, int errnum);
-/**!
-* finds hardware configuration, in particular the target pixel format
-* and whether the encoder uses hardware frame upload
-*/
+
+/**
+ * \brief finds hardware configuration.
+ *
+ * Finds hardware configuration, in particular the target pixel format
+ * and whether the encoder uses hardware frame upload.
+ * \param usesHWFrames will be set to true if hw frames are used
+ * \param hwDevType the hardware device type to probe get the config for
+ * \param codec the codec to get the config for
+ * \return the hardware pixel format to use, or AV_PIX_FMT_NONE
+ */
 enum AVPixelFormat find_hw_config(
   bool * usesHWFrames, enum AVHWDeviceType hwDevType, const AVCodec * codec);
+
+/**
+ * \brief Gets all pixel formats that can be transferred to the hardware device
+ * \param hwframe_ctx the hardware frame context for which transfer is intended
+ * \return vector of allowed pixel formats
+ */
 std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwframe_ctx);
 
-/**!
-* finds formats that the encoder supports. Note that for VAAPI, this will just
-* return AV_PIX_FMT_VAAPI since it uses hardware frames.
-*/
+/**
+ * \brief finds all formats that the encoder supports.
+ *
+ * Note that for VAAPI, this will justreturn AV_PIX_FMT_VAAPI since it uses hardware frames.
+ * \param @return vector with pixel formats supported by codec in this context
+ */
 std::vector<enum AVPixelFormat> get_encoder_formats(
-  AVCodecContext * context, const AVCodec * avctx);
-/**!
-* picks from a vector of formats the "best" pixel format for a given encoder
-*/
+  const AVCodecContext * context, const AVCodec * avctx);
+
+/**
+ * \brief gets the preferred pixel format from list.
+ * \param useHWFormat if true only return hardware accelerated formats
+ * \param fmts vector of formats to choose from
+ * \return preferred pixel format
+ */
 enum AVPixelFormat get_preferred_pixel_format(
   bool useHWFormat, const std::vector<AVPixelFormat> & fmts);
 
-/**!
-* finds the names of all available decoders for a given encoding (or encoder)
-*/
+/**
+ * \brief finds the names of all available decoders
+ *        for a given codec (or encoder)
+ * \param codec the codec / encoding to find decoders for
+ * \param hw_decoders (output) non-null ptr to hardware decoders
+ * \param sw_decoders (output) non-null ptr to software decoders
+ */
 void find_decoders(
-  const std::string & encoding, std::vector<std::string> * hw_decoders,
+  const std::string & codec, std::vector<std::string> * hw_decoders,
   std::vector<std::string> * sw_decoders);
 
-/**!
-* * get hardware device types
-*/
+/**
+ * \brief gets list of names of all libav supported device types
+ *
+ * This is not the list of devices present on the host machine, just
+ * the ones that libav supports, whether they are present or not.
+ * \return list of all libav supported device types
+ */
 std::vector<std::string> get_hwdevice_types();
 
-/**!
-* find encoding for given encoder
-*/
-std::string find_encoding(const std::string & encoder);
+/**
+ * \brief find codec for a given encoder
+ * \param encoder name of libav encoder
+ * \return name of codec
+ */
+std::string find_codec(const std::string & encoder);
 
-/**!
-* gets hardware device type for specific codec
-*/
+/**
+ * \brief gets hardware device type for specific codec
+ * \param codec pointer to libav codec
+ * \param return associated hardware device type
+ */
 enum AVHWDeviceType find_hw_device_type(const AVCodec * codec);
+
+/**
+ * \brief finds AVPixelFormat corresponding to ROS encoding
+ * \param ros_pix_fmt ros encoding name, e.g. "bgr8"
+ * \return corresponding AV pixel format
+ * \throws std::runtime_error exception when no match found.
+ */
+enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt);
 
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder
