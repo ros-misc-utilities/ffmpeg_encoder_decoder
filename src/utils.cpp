@@ -19,7 +19,9 @@
 #include <map>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <set>
+#include <unordered_map>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -114,7 +116,8 @@ enum AVPixelFormat get_preferred_pixel_format(
   return (AV_PIX_FMT_NONE);
 }
 
-std::vector<enum AVPixelFormat> get_encoder_formats(AVCodecContext * context, const AVCodec * c)
+std::vector<enum AVPixelFormat> get_encoder_formats(
+  const AVCodecContext * context, const AVCodec * c)
 {
   std::vector<enum AVPixelFormat> formats;
   if (c) {
@@ -151,6 +154,44 @@ std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwfra
   }
   return (formats);
 }
+
+static const std::unordered_map<std::string, enum AVPixelFormat> ros_to_av_pix_map = {
+  {"bayer_rggb8", AV_PIX_FMT_BAYER_RGGB8},
+  {"bayer_bggr8", AV_PIX_FMT_BAYER_BGGR8},
+  {"bayer_gbrg8", AV_PIX_FMT_BAYER_GBRG8},
+  {"bayer_grbg8", AV_PIX_FMT_BAYER_GRBG8},
+  {"bayer_rggb16", AV_PIX_FMT_BAYER_RGGB16LE},  // map to little endian :(
+  {"bayer_bggr16", AV_PIX_FMT_BAYER_BGGR16LE},
+  {"bayer_gbrg16", AV_PIX_FMT_BAYER_GBRG16LE},
+  {"bayer_grbg16", AV_PIX_FMT_BAYER_GRBG16LE},
+  {"rgb8", AV_PIX_FMT_RGB24},
+  {"rgba8", AV_PIX_FMT_RGBA},
+  {"rgb16", AV_PIX_FMT_RGB48LE},
+  {"rgba16", AV_PIX_FMT_RGBA64LE},
+  {"bgr8", AV_PIX_FMT_BGR24},
+  {"bgra8", AV_PIX_FMT_BGRA},
+  {"bgr16", AV_PIX_FMT_BGR48LE},
+  {"bgra16", AV_PIX_FMT_BGRA64LE},
+  {"mono8", AV_PIX_FMT_GRAY8},
+  {"mono16", AV_PIX_FMT_GRAY16LE},
+  {"yuv422", AV_PIX_FMT_YUV422P},           // deprecated, not sure correct
+  {"uyvy", AV_PIX_FMT_UYVY422},             // not sure that is correct
+  {"yuyv", AV_PIX_FMT_YUYV422},             // not sure that is correct
+  {"yuv422_yuy2", AV_PIX_FMT_YUV422P16LE},  // deprecated, probably wrong
+  {"nv21", AV_PIX_FMT_NV21},
+  {"nv24", AV_PIX_FMT_NV24}};
+
+enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt)
+{
+  const auto it = ros_to_av_pix_map.find(ros_pix_fmt);
+  if (it == ros_to_av_pix_map.end()) {
+    RCLCPP_ERROR_STREAM(
+      rclcpp::get_logger("encoder"), "no AV pixel format known for ros format " << ros_pix_fmt);
+    throw(std::runtime_error("no matching pixel format found for: " + ros_pix_fmt));
+  }
+  return (it->second);
+}
+
 // find codec by name
 static const AVCodec * find_by_name(const std::string & name)
 {
@@ -185,7 +226,6 @@ static void find_decoders(
 }
 
 // This function finds the encoding that is the target of a given encoder.
-// of {id_of(hevc)}
 
 static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
 {
@@ -213,7 +253,7 @@ void find_decoders(
   find_decoders(real_encoding, sw_decoders, false);
 }
 
-std::string find_encoding(const std::string & encoder)
+std::string find_codec(const std::string & encoder)
 {
   const AVCodec * c = find_by_name(encoder);
   if (!c) {
