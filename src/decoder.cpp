@@ -76,21 +76,40 @@ bool Decoder::initialize(
 {
   callback_ = callback;
   encoding_ = encoding;
-  if (decoders.empty()) {
-    const auto all_decoders = findDecoders(encoding);
-    if (all_decoders.empty()) {
-      RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for encoding " << encoding_);
-      throw(std::runtime_error("no decoders discovered for encoding " + encoding_));
-    }
+  const auto all_decoders = findDecoders(encoding);
+  if (all_decoders.empty()) {
+    RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for encoding " << encoding_);
+    throw(std::runtime_error("no decoders discovered for encoding " + encoding_));
+  }
+  if (decoders.empty()) {  // try all libav-discovered decoders
     std::string decoders_str;
     for (const auto & decoder : all_decoders) {
       decoders_str += " " + decoder;
     }
     RCLCPP_INFO_STREAM(logger_, "trying discovered decoders in order:" << decoders_str);
-
     return (initDecoder(all_decoders));
   }
-  return (initDecoder(decoders));
+  const auto good_decoders = filterDecoders(encoding, decoders, all_decoders);
+  if (good_decoders.empty()) {
+    return (false);
+  }
+  return (initDecoder(good_decoders));
+}
+
+std::vector<std::string> Decoder::filterDecoders(
+  const std::string & encoding, const std::vector<std::string> & decoders,
+  const std::vector<std::string> & valid_decoders)
+{
+  std::vector<std::string> good_decoders;
+  for (const auto & dec : decoders) {  // filter for decoders matching codec
+    if (std::find(valid_decoders.begin(), valid_decoders.end(), dec) != valid_decoders.end()) {
+      good_decoders.push_back(dec);
+    } else {
+      RCLCPP_WARN_STREAM(
+        logger_, "configured decoder: " << dec << " cannot handle encoding: " << encoding);
+    }
+  }
+  return (good_decoders);
 }
 
 static AVBufferRef * hw_decoder_init(
