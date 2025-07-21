@@ -39,6 +39,9 @@ std::string pix(AVPixelFormat const & f)
   char buf[64];
   buf[63] = 0;
   av_get_pix_fmt_string(buf, sizeof(buf) - 1, f);
+  if (f == AV_PIX_FMT_NONE) {
+    return (std::string("NONE"));
+  }
   return (std::string(buf));
 }
 
