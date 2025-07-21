@@ -74,7 +74,8 @@ enum AVPixelFormat find_hw_config(
  * \param hwframe_ctx the hardware frame context for which transfer is intended
  * \return vector of allowed pixel formats
  */
-std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwframe_ctx);
+std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(
+  AVBufferRef * hwframe_ctx, enum AVHWFrameTransferDirection direction);
 
 /**
  * \brief finds all formats that the encoder supports.

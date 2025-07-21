@@ -138,12 +138,12 @@ std::vector<enum AVPixelFormat> get_encoder_formats(
   return (formats);
 }
 
-std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(AVBufferRef * hwframe_ctx)
+std::vector<enum AVPixelFormat> get_hwframe_transfer_formats(
+  AVBufferRef * hwframe_ctx, enum AVHWFrameTransferDirection direction)
 {
   std::vector<enum AVPixelFormat> formats;
   AVPixelFormat * fmts{nullptr};
-  int ret =
-    av_hwframe_transfer_get_formats(hwframe_ctx, AV_HWFRAME_TRANSFER_DIRECTION_FROM, &fmts, 0);
+  int ret = av_hwframe_transfer_get_formats(hwframe_ctx, direction, &fmts, 0);
   if (ret >= 0) {
     for (const auto * f = fmts; *f != AV_PIX_FMT_NONE; f++) {
       formats.push_back(*f);
