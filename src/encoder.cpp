@@ -109,17 +109,36 @@ void Encoder::openHardwareDevice(
   int err = 0;
   err = av_hwdevice_ctx_create(&hwDeviceContext_, hwDevType, NULL, NULL, 0);
   utils::check_for_err("cannot create hw device context", err);
-  AVBufferRef * hw_frames_ref = av_hwframe_ctx_alloc(hwDeviceContext_);
-  if (!hw_frames_ref) {
-    throw std::runtime_error("cannot allocate hw device!");
+
+  AVBufferRef * hwframe_ctx_ref = av_hwframe_ctx_alloc(hwDeviceContext_);
+  if (!hwframe_ctx_ref) {
+    av_buffer_unref(&hwDeviceContext_);
+    hwDeviceContext_ = 0;
+    throw std::runtime_error("cannot allocate hwframe context!");
+  }
+  const auto hwframe_transfer_formats =
+    utils::get_hwframe_transfer_formats(hwframe_ctx_ref, AV_HWFRAME_TRANSFER_DIRECTION_TO);
+
+  if (hwframe_transfer_formats.empty()) {
+    // Bernd: Apparently NVENC does not need a device to be opened at all.
+    // But how to tell if a device should be opened in general?
+    // Checking if the list of TO transfer formats is empty() works to tell
+    // NVENC (no device required) from VAAPI (device required).
+    // This test may be broken in general!
+    av_buffer_unref(&hwDeviceContext_);
+    hwDeviceContext_ = 0;
+    av_buffer_unref(&hwframe_ctx_ref);
+    RCLCPP_INFO_STREAM(logger_, "no need to open device for codec " << codec->name);
+    return;
   }
 
-  AVHWFramesContext * frames_ctx = reinterpret_cast<AVHWFramesContext *>(hw_frames_ref->data);
+  // cast the reference to a concrete pointer
+  AVHWFramesContext * frames_ctx = reinterpret_cast<AVHWFramesContext *>(hwframe_ctx_ref->data);
   frames_ctx->format = utils::find_hw_config(&usesHardwareFrames_, hwDevType, codec);
 
   if (usesHardwareFrames_) {
-    const auto fmts = utils::get_hwframe_transfer_formats(hw_frames_ref);
-    frames_ctx->sw_format = utils::get_preferred_pixel_format(usesHardwareFrames_, fmts);
+    frames_ctx->sw_format =
+      utils::get_preferred_pixel_format(usesHardwareFrames_, hwframe_transfer_formats);
     if (pixFormat_ != AV_PIX_FMT_NONE) {
       RCLCPP_INFO_STREAM(
         logger_, "user overriding software pix fmt " << utils::pix(frames_ctx->sw_format));
@@ -130,7 +149,7 @@ void Encoder::openHardwareDevice(
         logger_, "using software pixel format: " << utils::pix(frames_ctx->sw_format));
     }
     if (frames_ctx->sw_format == AV_PIX_FMT_NONE) {
-      av_buffer_unref(&hw_frames_ref);
+      av_buffer_unref(&hwframe_ctx_ref);
       throw(std::runtime_error("cannot find valid sw pixel format!"));
     }
   }
@@ -138,13 +157,12 @@ void Encoder::openHardwareDevice(
   frames_ctx->width = width;
   frames_ctx->height = height;
   frames_ctx->initial_pool_size = 20;
-  if ((err = av_hwframe_ctx_init(hw_frames_ref)) < 0) {
-    av_buffer_unref(&hw_frames_ref);
+  if ((err = av_hwframe_ctx_init(hwframe_ctx_ref)) < 0) {
+    av_buffer_unref(&hwframe_ctx_ref);
     utils::throw_err("failed to initialize hardware frame context", err);
   }
-  codecContext_->hw_frames_ctx = av_buffer_ref(hw_frames_ref);
-
-  av_buffer_unref(&hw_frames_ref);
+  codecContext_->hw_frames_ctx = av_buffer_ref(hwframe_ctx_ref);
+  av_buffer_unref(&hwframe_ctx_ref);
 
   if (codecContext_->hw_frames_ctx == nullptr) {
     throw(std::runtime_error("hardware decoder: cannot create buffer ref!"));
@@ -228,6 +246,9 @@ void Encoder::doOpenCodec(int width, int height)
   RCLCPP_INFO(
     logger_, "codec: %10s, bit_rate: %10ld qmax: %2d options: %s", encoder_.c_str(), bitRate_,
     qmax_, ss.str().c_str());
+  RCLCPP_INFO_STREAM(logger_, "cv_bridge_target_format: " << cvBridgeTargetFormat_);
+  RCLCPP_INFO_STREAM(logger_, "av_source_pixel_format: " << utils::pix(codecContext_->sw_pix_fmt));
+  RCLCPP_INFO_STREAM(logger_, "encoder (hw) format:    " << utils::pix(codecContext_->pix_fmt));
 
   err = avcodec_open2(codecContext_, codec, NULL);
   utils::check_for_err("cannot open codec " + encoder_, err);
