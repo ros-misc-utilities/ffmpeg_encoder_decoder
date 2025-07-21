@@ -235,7 +235,7 @@ void Encoder::doOpenCodec(int width, int height)
   } else {
     codecContext_->pix_fmt = (pixFormat_ != AV_PIX_FMT_NONE)
                                ? pixFormat_
-                               : utils::get_preferred_pixel_format(!usesHardwareFrames_, pixFmts);
+                               : utils::get_preferred_pixel_format(usesHardwareFrames_, pixFmts);
     codecContext_->sw_pix_fmt = codecContext_->pix_fmt;
   }
   std::stringstream ss;
