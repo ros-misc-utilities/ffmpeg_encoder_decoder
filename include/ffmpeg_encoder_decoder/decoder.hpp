@@ -226,6 +226,10 @@ public:
 private:
   bool initSingleDecoder(const std::string & decoder);
   bool initDecoder(const std::vector<std::string> & decoders);
+  std::vector<std::string> filterDecoders(
+    const std::string & encoding, const std::vector<std::string> & decoders,
+    const std::vector<std::string> & valid_decoders);
+
   int receiveFrame();
   // --------------- variables
   rclcpp::Logger logger_;
