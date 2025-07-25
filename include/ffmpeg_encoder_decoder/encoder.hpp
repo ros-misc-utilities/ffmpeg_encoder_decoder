@@ -60,10 +60,6 @@ namespace ffmpeg_encoder_decoder
   enc.setAVOption("x265-params", "lossless=1");
   enc.setAVOption("crf", "0");
 
-  if (!enc.initialize(image_width, image_height, callback_fn)) {
-    std::cerr << "failed to initialize encoder!" << std::endl;
-    exit (-1);
-  }
   sensor_msgs::msg::Image image;
   image.encoding = "bgr8";
   image.width = image_width;
@@ -71,6 +67,11 @@ namespace ffmpeg_encoder_decoder
   image.step = image.width * 3;  // 3 bytes per pixel
   image.header.frame_id = "frame_id";
   image.is_bigendian = false;
+
+  if (!enc.initialize(image.width, image.height, callback_fn, image.encoding)) {
+    std::cerr << "failed to initialize encoder!" << std::endl;
+    exit (-1);
+  }
 
   for (int64_t i = 0; i < numFrames; i++) {
     image.header.stamp = rclcpp::Time(i + 1, RCL_SYSTEM_TIME);
@@ -141,6 +142,21 @@ public:
   {
     Lock lock(mutex_);
     pixFormat_ = pixelFormat(fmt);
+  }
+  /**
+   * \brief Enables/disables initial image conversion of ROS message via cv_bridge.
+   *
+   * Allows for disabling the cv_bridge initial format conversion.
+   * In this case the image format of the ROS message must match
+   * the av_source_pixel_format or BAD THINGS happen! By default
+   * the cv bridge conversion is enabled.
+   *
+   * \param b  flag to enable or disable the cv bridge
+   */
+  void setUseCVBridge(bool b)
+  {
+    Lock lock(mutex_);
+    useCVBridge_ = b;
   }
   /**
    * \brief Set cv_bridge_target_format for first image conversion
@@ -266,8 +282,9 @@ public:
    * \param width image width
    * \param height image height
    * \param callback the function to call for handling encoded packets
+   * \param encoding the ros encoding string, e.g. bayer_rggb8, rgb8 ...
    */
-  bool initialize(int width, int height, Callback callback);
+  bool initialize(int width, int height, Callback callback, const std::string & encoding);
   /**
    * \brief sets ROS logger to use for info/error messages
    * \param logger the logger to use for messages
@@ -350,8 +367,8 @@ public:
 private:
   using Lock = std::unique_lock<std::recursive_mutex>;
 
-  bool openCodec(int width, int height);
-  void doOpenCodec(int width, int height);
+  bool openCodec(int width, int height, const std::string & encoding);
+  void doOpenCodec(int width, int height, const std::string & encoding);
   void closeCodec();
   void doEncodeImage(const cv::Mat & img, const Header & header, const rclcpp::Time & t0);
   int drainPacket(int width, int height);
@@ -359,23 +376,28 @@ private:
   void openHardwareDevice(
     const AVCodec * codec, enum AVHWDeviceType hwDevType, int width, int height);
   void setAVOption(const std::string & field, const std::string & value);
+  enum AVPixelFormat findMatchingSourceFormat(
+    const std::string & rosSrcFormat, enum AVPixelFormat targetFormat);
+
   // --------- variables
   rclcpp::Logger logger_;
   mutable std::recursive_mutex mutex_;
   Callback callback_;
   // config
-  std::string encoder_;  // e.g. "libx264"
-  std::string codec_;    // e.g. "h264"
-  int qmax_{-1};         // max allowed quantization. The lower the better quality
-  int GOPSize_{-1};      // distance between two keyframes
-  int maxBFrames_{-1};   // maximum number of b-frames
-  int64_t bitRate_{0};   // max rate in bits/s
+  std::string encoder_;   // e.g. "libx264"
+  std::string codec_;     // e.g. "h264"
+  std::string encoding_;  // e.g. "h264/rgb8"
+  int qmax_{-1};          // max allowed quantization. The lower the better quality
+  int GOPSize_{-1};       // distance between two keyframes
+  int maxBFrames_{-1};    // maximum number of b-frames
+  int64_t bitRate_{0};    // max rate in bits/s
   std::vector<std::pair<std::string, std::string>> avOptions_;
 
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
   std::string cvBridgeTargetFormat_ = "bgr8";
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
+  bool useCVBridge_{true};
   bool usesHardwareFrames_{false};
   // ------ libav state
   AVCodecContext * codecContext_{nullptr};

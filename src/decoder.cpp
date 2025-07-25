@@ -25,7 +25,7 @@
 namespace ffmpeg_encoder_decoder
 {
 
-Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) { setOutputMessageEncoding("bgr8"); }
+Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) {}
 
 Decoder::~Decoder() { reset(); }
 
@@ -49,18 +49,13 @@ void Decoder::reset()
   av_free(outputFrame_);
   outputFrame_ = NULL;
   hwPixFormat_ = AV_PIX_FMT_NONE;
+  outputMsgEncoding_ = "";
 }
 
 void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
 {
+  RCLCPP_INFO_STREAM(logger_, "forcing output encoding: " << output_encoding);
   outputMsgEncoding_ = output_encoding;
-  outputAVPixFormat_ = utils::ros_to_av_pix_format(output_encoding);
-  const AVPixFmtDescriptor * pd = av_pix_fmt_desc_get(outputAVPixFormat_);
-  if (!pd) {
-    RCLCPP_ERROR_STREAM(logger_, "cannot find pixel format descriptor for " << output_encoding);
-    throw(std::runtime_error("cannot find format descriptor!"));
-  }
-  bitsPerPixel_ = av_get_padded_bits_per_pixel(pd);
 }
 
 bool Decoder::initialize(
@@ -75,11 +70,19 @@ bool Decoder::initialize(
   const std::string & encoding, Callback callback, const std::vector<std::string> & decoders)
 {
   callback_ = callback;
-  encoding_ = encoding;
-  const auto all_decoders = findDecoders(encoding);
+  packetEncoding_ = encoding;
+  const auto split = utils::split_by_char(encoding, '/');
+  if (outputMsgEncoding_.empty()) {
+    // assume orig was bgr8
+    outputMsgEncoding_ = split.size() > 1 ? split[1] : "bgr8";
+    RCLCPP_INFO_STREAM(
+      logger_,
+      "output image encoding: " << outputMsgEncoding_ << ((split.size() > 1) ? "" : " (default)"));
+  }
+  const auto all_decoders = findDecoders(split[0]);
   if (all_decoders.empty()) {
-    RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for encoding " << encoding_);
-    throw(std::runtime_error("no decoders discovered for encoding " + encoding_));
+    RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for code:c " << split[0]);
+    throw(std::runtime_error("no decoders discovered for codec: " + split[0]));
   }
   if (decoders.empty()) {  // try all libav-discovered decoders
     std::string decoders_str;
@@ -316,7 +319,6 @@ bool Decoder::initSingleDecoder(const std::string & decoder)
     swFrame_ = av_frame_alloc();
     cpuFrame_ = (hwPixFormat_ == AV_PIX_FMT_NONE) ? NULL : av_frame_alloc();
     outputFrame_ = av_frame_alloc();
-    outputFrame_->format = outputAVPixFormat_;
   } catch (const std::runtime_error & e) {
     RCLCPP_ERROR_STREAM(logger_, e.what());
     reset();
@@ -366,33 +368,19 @@ int Decoder::receiveFrame()
   }
   AVFrame * frame = isAcc ? cpuFrame_ : swFrame_;
 
-  if (frame->width != 0) {
-    // convert image to something palatable
-    if (!swsContext_) {
-      swsContext_ = sws_getContext(
-        ctx->width, ctx->height, (AVPixelFormat)frame->format,         // src
-        ctx->width, ctx->height, (AVPixelFormat)outputFrame_->format,  // dest
-        SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
-      if (!swsContext_) {
-        RCLCPP_ERROR(logger_, "cannot allocate sws context!!!!");
-        return (AVERROR_BUFFER_TOO_SMALL);
-      }
-    }
+  if (frame->width == ctx->width && frame->height == ctx->height) {
     // prepare the decoded message
     ImagePtr image(new Image());
     image->height = frame->height;
     image->width = frame->width;
-    image->step = (image->width * bitsPerPixel_) / 8;  // is this correct for weird formats?
+    image->step = (sensor_msgs::image_encodings::bitDepth(outputMsgEncoding_) / 8) * image->width *
+                  sensor_msgs::image_encodings::numChannels(outputMsgEncoding_);
     image->encoding = outputMsgEncoding_;
-    image->data.resize(image->step * image->height);
+    const int retc = convertFrameToMessage(frame, image);
+    if (retc != 0) {
+      return (retc);
+    }
 
-    // bend the memory pointers in outputFrame_ to the right locations
-    av_image_fill_arrays(
-      outputFrame_->data, outputFrame_->linesize, &(image->data[0]),
-      static_cast<AVPixelFormat>(outputFrame_->format), frame->width, frame->height, 1);
-    sws_scale(
-      swsContext_, frame->data, frame->linesize, 0,              // src
-      ctx->height, outputFrame_->data, outputFrame_->linesize);  // dest
     auto it = ptsToStamp_.find(swFrame_->pts);
     if (it == ptsToStamp_.end()) {
       RCLCPP_ERROR_STREAM(logger_, "cannot find pts that matches " << swFrame_->pts);
@@ -401,13 +389,46 @@ int Decoder::receiveFrame()
       image->header.stamp = it->second.time;
       ptsToStamp_.erase(it);
 #ifdef USE_AV_FLAGS
-      callback_(image, swFrame_->flags || AV_FRAME_FLAG_KEY);  // deliver callback
+      callback_(image, swFrame_->flags, utils::pix(static_cast<AVPixelFormat>(frame->format)));
 #else
-      callback_(image, swFrame_->key_frame);  // deliver callback
+      callback_(image, swFrame_->key_frame, utils::pix(static_cast<AVPixelFormat>(frame->format)));
 #endif
     }
   }
   return (ret);
+}
+
+int Decoder::convertFrameToMessage(const AVFrame * frame, const ImagePtr & image)
+{
+  const auto srcFmt = static_cast<AVPixelFormat>(frame->format);
+  const bool encAsColor = utils::encode_single_channel_as_color(image->encoding, srcFmt);
+  if (!swsContext_) {  // initialize reformatting context if first time
+    // If encode-mono-as-color hack has been used, leave the pixel
+    // format as is, and later simply crop away the bottom 1/3 of image.
+    outputFrame_->format = encAsColor ? srcFmt : utils::ros_to_av_pix_format(outputMsgEncoding_);
+    swsContext_ = sws_getContext(
+      frame->width, frame->height, srcFmt,                                            // src
+      frame->width, frame->height, static_cast<AVPixelFormat>(outputFrame_->format),  // dest
+      SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+    if (!swsContext_) {
+      RCLCPP_ERROR(logger_, "cannot allocate sws context!!!!");
+      return (AVERROR_BUFFER_TOO_SMALL);
+    }
+  }
+
+  image->data.resize(
+    encAsColor ? ((image->step * image->height * 3) / 2) : (image->step * image->height));
+  // bend the memory pointers in outputFrame_ to the right locations
+  av_image_fill_arrays(
+    outputFrame_->data, outputFrame_->linesize, &(image->data[0]),
+    static_cast<AVPixelFormat>(outputFrame_->format), frame->width, frame->height, 1);
+  sws_scale(
+    swsContext_, frame->data, frame->linesize, 0,                // src
+    frame->height, outputFrame_->data, outputFrame_->linesize);  // dest
+
+  // now resize in case we encoded single-channel as colorz
+  image->data.resize(image->step * image->height);
+  return (0);
 }
 
 bool Decoder::decodePacket(
@@ -422,9 +443,9 @@ bool Decoder::decodePacket(
   if (measurePerformance_) {
     t0 = rclcpp::Clock().now();
   }
-  if (encoding != encoding_) {
+  if (encoding != packetEncoding_) {
     RCLCPP_ERROR_STREAM(
-      logger_, "no on-the fly encoding change from " << encoding_ << " to " << encoding);
+      logger_, "no on-the fly encoding change from " << packetEncoding_ << " to " << encoding);
     return (false);
   }
   AVCodecContext * ctx = codecContext_;
@@ -474,16 +495,16 @@ const std::unordered_map<std::string, std::string> & Decoder::getDefaultEncoderT
 }
 
 void Decoder::findDecoders(
-  const std::string & encoding, std::vector<std::string> * hw_decoders,
+  const std::string & codec, std::vector<std::string> * hw_decoders,
   std::vector<std::string> * sw_decoders)
 {
-  utils::find_decoders(encoding, hw_decoders, sw_decoders);
+  utils::find_decoders(codec, hw_decoders, sw_decoders);
 }
 
-std::vector<std::string> Decoder::findDecoders(const std::string & encoding)
+std::vector<std::string> Decoder::findDecoders(const std::string & codec)
 {
   std::vector<std::string> sw_decoders, all_decoders;
-  utils::find_decoders(encoding, &all_decoders, &sw_decoders);
+  utils::find_decoders(codec, &all_decoders, &sw_decoders);
   all_decoders.insert(all_decoders.end(), sw_decoders.begin(), sw_decoders.end());
   return (all_decoders);
 }

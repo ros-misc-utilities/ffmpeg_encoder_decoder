@@ -21,6 +21,7 @@
 #include <ffmpeg_image_transport_msgs/msg/ffmpeg_packet.hpp>
 #include <opencv2/imgcodecs/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <sensor_msgs/image_encodings.hpp>
 #include <unordered_map>
 
 using namespace std::placeholders;
@@ -151,7 +152,6 @@ private:
     const auto it = time_to_image_.find(stamp);
     if (it == time_to_image_.end()) {
       std::cerr << "cannot find image from time stamp " << stamp << std::endl;
-      ;
       throw(std::runtime_error("image time stamp not found"));
     }
     const auto & orig = it->second;
@@ -163,7 +163,7 @@ private:
     EXPECT_EQ(img->height, orig->height);
     EXPECT_EQ(img->step, orig->step);
     EXPECT_EQ(img->data.size(), orig->data.size());
-    EXPECT_EQ(img->step, img->width * 3);
+    EXPECT_EQ(img->step, orig->step);
     EXPECT_EQ(img->step * img->height, orig->data.size());
     EXPECT_GE(img->data.size(), 1);
     bool data_equal{true};
@@ -172,6 +172,7 @@ private:
         std::cout << "mismatch at " << i << ", orig: " << static_cast<int>(orig->data[i])
                   << " now: " << static_cast<int>(img->data[i]) << std::endl;
         data_equal = false;
+        break;
       }
     }
     EXPECT_TRUE(data_equal);
@@ -202,12 +203,6 @@ void test_encoder_msg(int numFrames, const std::string & encoder, EncoderTester 
   enc.setGOPSize(2);
   enc.setFrameRate(100, 1);
 
-  if (!enc.initialize(
-        tester->getWidth(), tester->getHeight(),
-        std::bind(&EncoderTester::packetReady, tester, _1, _2, _3, _4, _5, _6, _7, _8, _9))) {
-    std::cerr << "failed to initialize encoder!" << std::endl;
-    return;
-  }
   Image image;
   image.encoding = "bgr8";
   image.width = tester->getWidth();
@@ -215,6 +210,13 @@ void test_encoder_msg(int numFrames, const std::string & encoder, EncoderTester 
   image.step = image.width * 3;  // 3 bytes per pixel
   image.header.frame_id = tester->getFrameId();
   image.is_bigendian = false;
+  if (!enc.initialize(
+        image.width, image.height,
+        std::bind(&EncoderTester::packetReady, tester, _1, _2, _3, _4, _5, _6, _7, _8, _9),
+        image.encoding)) {
+    std::cerr << "failed to initialize encoder!" << std::endl;
+    return;
+  }
 
   for (int64_t i = 0; i < numFrames; i++) {
     image.header.stamp = rclcpp::Time(i + 1, RCL_SYSTEM_TIME);
@@ -224,8 +226,9 @@ void test_encoder_msg(int numFrames, const std::string & encoder, EncoderTester 
   enc.flush();
 }
 
-void test_encoder_decoder_msg(
+void test_encoder_decoder(
   int numFrames, const std::string & encoder, const std::string & decoder,
+  const std::string & encoding, const std::string & cv_target_fmt, const std::string & av_src_fmt,
   EncoderTester * enc_tester, DecoderTester * dec_tester)
 {
   dec_tester->setDecoder(decoder);
@@ -233,24 +236,25 @@ void test_encoder_decoder_msg(
   enc.setEncoder(encoder);
   enc.addAVOption("x265-params", "lossless=1");
   enc.addAVOption("crf", "0");  // may not be needed for lossless
-  enc.setAVSourcePixelFormat("gray");
-  enc.setCVBridgeTargetFormat("mono8");
+  enc.setAVSourcePixelFormat(av_src_fmt);
+  enc.setCVBridgeTargetFormat(cv_target_fmt);
   enc_tester->setCallback(
     std::bind(&DecoderTester::packetReady, dec_tester, _1, _2, _3, _4, _5, _6, _7, _8, _9));
 
   if (!enc.initialize(
         enc_tester->getWidth(), enc_tester->getHeight(),
-        std::bind(&EncoderTester::packetReady, enc_tester, _1, _2, _3, _4, _5, _6, _7, _8, _9))) {
+        std::bind(&EncoderTester::packetReady, enc_tester, _1, _2, _3, _4, _5, _6, _7, _8, _9),
+        encoding)) {
     std::cerr << "failed to initialize encoder!" << std::endl;
     return;
   }
-
   for (int64_t i = 0; i < numFrames; i++) {
     auto image = std::make_shared<Image>();
-    image->encoding = "bgr8";
+    image->encoding = encoding;
     image->width = enc_tester->getWidth();
     image->height = enc_tester->getHeight();
-    image->step = image->width * 3;  // 3 bytes per pixel
+    image->step = (sensor_msgs::image_encodings::bitDepth(encoding) / 8) * image->width *
+                  sensor_msgs::image_encodings::numChannels(encoding);
     image->header.frame_id = enc_tester->getFrameId();
     image->is_bigendian = false;
 
@@ -266,7 +270,7 @@ void test_encoder_decoder_msg(
 TEST(ffmpeg_encoder_decoder, encoder_msg)
 {
   const int n = 10;
-  EncoderTester tester("frame_id", "h264", 640, 480);
+  EncoderTester tester("frame_id", "h264/bgr8", 640, 480);
   test_encoder_msg(n, "libx264", &tester);
   // EXPECT_EQ(tester.getPacketSum(), 115852); varies between ffmpeg versions
   EXPECT_EQ(tester.getTsSum(), (n * (n + 1)) / 2);
@@ -279,10 +283,29 @@ TEST(ffmpeg_encoder_decoder, encoder_decoder_msg)
   const int n = 10;
   const int w = 640;
   const int h = 480;
-  EncoderTester enc_tester("frame_id", "hevc", w, h);
-  DecoderTester dec_tester("frame_id", "hevc", w, h);
-  test_encoder_decoder_msg(n, "libx265", "hevc", &enc_tester, &dec_tester);
-  // EXPECT_EQ(enc_tester.getPacketSum(), 266674); differs with ffmpeg version
+  EncoderTester enc_tester("frame_id", "hevc/bgr8", w, h);
+  DecoderTester dec_tester("frame_id", "hevc/bgr8", w, h);
+  // test pipeline bgr8 -> mono8 --- enc/dec[gray] --> mono8
+  test_encoder_decoder(
+    n, "libx265", "hevc", "bgr8" /*encoding*/, "mono8" /*cv tgt */, "gray" /*av src fmt */,
+    &enc_tester, &dec_tester);
+  EXPECT_EQ(enc_tester.getTsSum(), (n * (n + 1)) / 2);
+  EXPECT_EQ(enc_tester.getPtsSum(), (n * (n - 1)) / 2);
+  EXPECT_EQ(enc_tester.getPacketCounter(), n);
+  EXPECT_EQ(dec_tester.getPacketCounter(), n);
+  EXPECT_EQ(dec_tester.getFrameCounter(), n);
+}
+
+TEST(ffmpeg_encoder_decoder, encoder_decoder_nv12_hack)
+{
+  const int n = 10;
+  const int w = 640;
+  const int h = 480;
+  EncoderTester enc_tester("frame_id", "hevc/bayer_rggb8", w, h);
+  DecoderTester dec_tester("frame_id", "hevc/bayer_rggb8", w, h);
+  test_encoder_decoder(
+    n, "libx265", "hevc", "bayer_rggb8" /*encoding*/, "bayer_rggb8" /*cv tgt */,
+    "yuv420p" /*av src fmt */, &enc_tester, &dec_tester);
   EXPECT_EQ(enc_tester.getTsSum(), (n * (n + 1)) / 2);
   EXPECT_EQ(enc_tester.getPtsSum(), (n * (n - 1)) / 2);
   EXPECT_EQ(enc_tester.getPacketCounter(), n);

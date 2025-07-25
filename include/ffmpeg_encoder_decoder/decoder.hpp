@@ -44,7 +44,8 @@ namespace ffmpeg_encoder_decoder
  * Encoder class by leveraging libav, the collection of libraries used by ffmpeg.
  * Sample code:
  ```
-void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr & img, bool isKeyFrame)
+void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr & img, bool isKeyFrame,
+    const std::string &avPixFmt)
 {
   // process decoded image here...
 }
@@ -79,8 +80,10 @@ public:
    * \brief callback function signature
    * \param img pointer to decoded image
    * \param isKeyFrame true if the decoded image is a keyframe
+   * \param avPixFormat the original libav format of the encoded picture
    */
-  using Callback = std::function<void(const ImageConstPtr & img, bool isKeyFrame)>;
+  using Callback = std::function<void(
+    const ImageConstPtr & img, bool isKeyFrame, const std::string & avPixFormat)>;
 
   /**
    * \brief Constructor.
@@ -229,8 +232,9 @@ private:
   std::vector<std::string> filterDecoders(
     const std::string & encoding, const std::vector<std::string> & decoders,
     const std::vector<std::string> & valid_decoders);
-
   int receiveFrame();
+  int convertFrameToMessage(const AVFrame * frame, const ImagePtr & image);
+
   // --------------- variables
   rclcpp::Logger logger_;
   Callback callback_;
@@ -240,7 +244,8 @@ private:
   TDiff tdiffTotal_;
   // --- libav related variables
   AVRational timeBase_{1, 100};
-  std::string encoding_;
+  std::string packetEncoding_;
+  std::string origEncoding_;
   AVCodecContext * codecContext_{NULL};
   AVFrame * swFrame_{NULL};
   AVFrame * cpuFrame_{NULL};
@@ -248,8 +253,6 @@ private:
   SwsContext * swsContext_{NULL};
   enum AVPixelFormat hwPixFormat_;
   std::string outputMsgEncoding_;
-  enum AVPixelFormat outputAVPixFormat_ { AV_PIX_FMT_NONE };
-  int bitsPerPixel_;  // output format bits/pixel including padding
   AVPacket packet_;
   AVBufferRef * hwDeviceContext_{NULL};
 };
