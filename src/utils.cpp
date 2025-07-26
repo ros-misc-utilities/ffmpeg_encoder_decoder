@@ -20,6 +20,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/image_encodings.hpp>
 #include <set>
 #include <unordered_map>
 
@@ -35,6 +36,18 @@ namespace ffmpeg_encoder_decoder
 namespace utils
 {
 std::string pix(AVPixelFormat const & f)
+{
+  if (f == AV_PIX_FMT_NONE) {
+    return (std::string("NONE"));
+  }
+  const char * name = av_get_pix_fmt_name(f);
+  if (!name) {
+    return (std::string("UNKNOWN"));
+  }
+  return (std::string(name));
+}
+
+std::string pix_long(AVPixelFormat const & f)
 {
   char buf[64];
   buf[63] = 0;
@@ -105,7 +118,16 @@ enum AVPixelFormat get_preferred_pixel_format(
 {
   if (useHWFormat) {
     // the hardware encoders typically use nv12.
-    return (has_format(fmts, AV_PIX_FMT_NV12) ? AV_PIX_FMT_NV12 : AV_PIX_FMT_NONE);
+    if (has_format(fmts, AV_PIX_FMT_NV12)) {
+      return (AV_PIX_FMT_NV12);
+    }
+    if (has_format(fmts, AV_PIX_FMT_YUV420P)) {
+      return (AV_PIX_FMT_YUV420P);
+    }
+    if (fmts.size() > 0) {
+      return (fmts[0]);
+    }
+    return (AV_PIX_FMT_NONE);
   }
   if (has_format(fmts, AV_PIX_FMT_BGR24)) {
     return (AV_PIX_FMT_BGR24);  // fastest, needs no copy
@@ -182,7 +204,9 @@ static const std::unordered_map<std::string, enum AVPixelFormat> ros_to_av_pix_m
   {"yuyv", AV_PIX_FMT_YUYV422},             // not sure that is correct
   {"yuv422_yuy2", AV_PIX_FMT_YUV422P16LE},  // deprecated, probably wrong
   {"nv21", AV_PIX_FMT_NV21},
-  {"nv24", AV_PIX_FMT_NV24}};
+  {"nv24", AV_PIX_FMT_NV24},
+  {"nv12", AV_PIX_FMT_NV12}  // not an official ROS encoding!!
+};
 
 enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt)
 {
@@ -228,10 +252,24 @@ static void find_decoders(
   }
 }
 
+std::vector<std::string> split_by_char(const std::string & str_list, const char sep)
+{
+  std::stringstream ss(str_list);
+  std::vector<std::string> split;
+  for (std::string s; ss.good();) {
+    getline(ss, s, sep);
+    if (!s.empty()) {
+      split.push_back(s);
+    }
+  }
+  return (split);
+}
+
 // This function finds the encoding that is the target of a given encoder.
 
 static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
 {
+  // first look for encoder with that name
   const AVCodec * c = find_by_name(encoder);
   if (!c) {
     const AVCodecDescriptor * desc = NULL;
@@ -240,7 +278,7 @@ static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
         return (desc->id);
       }
     }
-    throw(std::runtime_error("unknown encoder: " + encoder));
+    throw(std::runtime_error("unknown encoder/encoding: " + encoder));
   }
   return (c->id);
 }
@@ -269,6 +307,19 @@ std::string find_codec(const std::string & encoder)
     }
   }
   throw(std::runtime_error("weird ffmpeg config error???"));
+}
+
+static bool isNV12LikeFormat(enum AVPixelFormat fmt)
+{
+  // any format where the top of the image is a full-resolution
+  // luminance image, and the bottom 1/3 holds the color channels
+  // should work
+  return (fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_YUV420P);
+}
+
+bool encode_single_channel_as_color(const std::string & encoding, enum AVPixelFormat fmt)
+{
+  return (sensor_msgs::image_encodings::numChannels(encoding) == 1 && isNV12LikeFormat(fmt));
 }
 
 std::vector<std::string> get_hwdevice_types()

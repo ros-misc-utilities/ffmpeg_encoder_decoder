@@ -96,11 +96,11 @@ AVPixelFormat Encoder::pixelFormat(const std::string & f) const
   return (fmt);
 }
 
-bool Encoder::initialize(int width, int height, Callback callback)
+bool Encoder::initialize(int width, int height, Callback callback, const std::string & encoding)
 {
   Lock lock(mutex_);
   callback_ = callback;
-  return (openCodec(width, height));
+  return (openCodec(width, height, encoding));
 }
 
 void Encoder::openHardwareDevice(
@@ -169,10 +169,10 @@ void Encoder::openHardwareDevice(
   }
 }
 
-bool Encoder::openCodec(int width, int height)
+bool Encoder::openCodec(int width, int height, const std::string & encoding)
 {
   try {
-    doOpenCodec(width, height);
+    doOpenCodec(width, height, encoding);
   } catch (const std::runtime_error & e) {
     RCLCPP_ERROR_STREAM(logger_, e.what());
     closeCodec();
@@ -183,9 +183,26 @@ bool Encoder::openCodec(int width, int height)
   return (true);
 }
 
-void Encoder::doOpenCodec(int width, int height)
+enum AVPixelFormat Encoder::findMatchingSourceFormat(
+  const std::string & rosSrcFormat, enum AVPixelFormat targetFormat)
+{
+  const auto targetFormatDesc = av_pix_fmt_desc_get(targetFormat);
+  if (!targetFormatDesc) {
+    RCLCPP_ERROR_STREAM(logger_, "invalid libav target format: " << static_cast<int>(targetFormat));
+    throw(std::runtime_error("invalid libav target format"));
+  }
+  // special hack to encode single-channel images as nv12/yuv420p etc
+  if (utils::encode_single_channel_as_color(rosSrcFormat, targetFormat)) {
+    return (targetFormat);
+  }
+  return (utils::ros_to_av_pix_format(rosSrcFormat));
+}
+
+void Encoder::doOpenCodec(int width, int height, const std::string &)
 {
   int err = 0;
+  encoding_ = codec_ + "/" + cvBridgeTargetFormat_;
+
   codecContext_ = nullptr;
   if (encoder_.empty()) {
     throw(std::runtime_error("no codec set!"));
@@ -246,7 +263,10 @@ void Encoder::doOpenCodec(int width, int height)
   RCLCPP_INFO(
     logger_, "codec: %10s, bit_rate: %10ld qmax: %2d options: %s", encoder_.c_str(), bitRate_,
     qmax_, ss.str().c_str());
-  RCLCPP_INFO_STREAM(logger_, "cv_bridge_target_format: " << cvBridgeTargetFormat_);
+  RCLCPP_INFO_STREAM(
+    logger_, "cv_bridge_target_format: "
+               << cvBridgeTargetFormat_
+               << " libav: " << utils::pix(utils::ros_to_av_pix_format(cvBridgeTargetFormat_)));
   RCLCPP_INFO_STREAM(logger_, "av_source_pixel_format: " << utils::pix(codecContext_->sw_pix_fmt));
   RCLCPP_INFO_STREAM(logger_, "encoder (hw) format:    " << utils::pix(codecContext_->pix_fmt));
 
@@ -285,11 +305,12 @@ void Encoder::doOpenCodec(int width, int height)
   packet_->data = NULL;
   packet_->size = 0;
 
-  // create (src) frame that wraps the received uncompressed image
+  // create (src) frame that wraps the received raw image
   wrapperFrame_ = av_frame_alloc();
   wrapperFrame_->width = width;
   wrapperFrame_->height = height;
-  wrapperFrame_->format = utils::ros_to_av_pix_format(cvBridgeTargetFormat_);
+  wrapperFrame_->format = findMatchingSourceFormat(
+    cvBridgeTargetFormat_, static_cast<enum AVPixelFormat>(frame_->format));
 
   // initialize format conversion library
   if (!swsContext_) {
@@ -321,8 +342,23 @@ void Encoder::encodeImage(const Image & msg)
   if (measurePerformance_) {
     t0 = rclcpp::Clock().now();
   }
-  cv::Mat img = cv_bridge::toCvCopy(msg, cvBridgeTargetFormat_)->image;
-  doEncodeImage(img, msg.header, t0);
+  try {
+    if (utils::encode_single_channel_as_color(
+          cvBridgeTargetFormat_, static_cast<AVPixelFormat>(wrapperFrame_->format))) {
+      // hack to encode single-channel ros formats as nv12/yuv420p etc
+      cv::Mat img(
+        msg.height, msg.width, cv::DataType<uint8_t>::type, const_cast<uint8_t *>(msg.data.data()),
+        msg.step);
+      // Add empty color channels to the bottom of matrix
+      img.push_back(cv::Mat::zeros(msg.height / 2, msg.width, cv::DataType<uint8_t>::type));
+      doEncodeImage(img, msg.header, t0);
+    } else {
+      cv::Mat img = cv_bridge::toCvCopy(msg, cvBridgeTargetFormat_)->image;
+      doEncodeImage(img, msg.header, t0);
+    }
+  } catch (const cv_bridge::Exception & e) {
+    RCLCPP_ERROR_STREAM(logger_, "cv_bridge convert failed: " << e.what());
+  }
   if (measurePerformance_) {
     const auto t1 = rclcpp::Clock().now();
     tdiffDebayer_.update((t1 - t0).seconds());
@@ -416,7 +452,7 @@ int Encoder::drainPacket(int width, int height)
     auto it = ptsToStamp_.find(pk.pts);
     if (it != ptsToStamp_.end()) {
       const auto & pe = it->second;
-      callback_(pe.frame_id, pe.time, codec_, width, height, pk.pts, pk.flags, pk.data, pk.size);
+      callback_(pe.frame_id, pe.time, encoding_, width, height, pk.pts, pk.flags, pk.data, pk.size);
       if (measurePerformance_) {
         const auto t3 = rclcpp::Clock().now();
         tdiffPublish_.update((t3 - t2).seconds());
