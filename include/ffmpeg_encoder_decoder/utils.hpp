@@ -36,6 +36,12 @@ namespace utils
 std::string pix(const AVPixelFormat & f);
 
 /**
+ * \brief Long descriptor of av pixel format
+ * \return string with long name of pixel format
+ */
+std::string pix_long(AVPixelFormat const & f);
+
+/**
  * \brief Convert av error number to string.
  * \param errnum libav error number
  * \return clear text string with error message
@@ -137,6 +143,21 @@ enum AVHWDeviceType find_hw_device_type(const AVCodec * codec);
  */
 enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt);
 
+/**
+ * \brief splits string by character
+ * \param str_list character-separated list of tokens
+ * \param sep separator character
+ * \return vector of separated strings
+ */
+std::vector<std::string> split_by_char(const std::string & str_list, const char sep);
+
+/**
+ * \brief determine if given ROS single-channel encoding fits into libav color format
+ * \param encoding ROS message encoding, e.g. bayer_rggb8
+ * \param fmt libav color format to test for
+ * \return true if ROS encoding is single channel and color format is like NV12/yuv420p
+ */
+bool encode_single_channel_as_color(const std::string & encoding, enum AVPixelFormat fmt);
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder
 #endif  // FFMPEG_ENCODER_DECODER__UTILS_HPP_
