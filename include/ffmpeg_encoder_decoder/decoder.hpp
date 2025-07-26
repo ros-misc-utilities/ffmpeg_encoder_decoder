@@ -251,7 +251,7 @@ private:
   AVFrame * cpuFrame_{NULL};
   AVFrame * outputFrame_{NULL};
   SwsContext * swsContext_{NULL};
-  enum AVPixelFormat hwPixFormat_;
+  enum AVPixelFormat hwPixFormat_ { AV_PIX_FMT_NONE };
   std::string outputMsgEncoding_;
   AVPacket packet_;
   AVBufferRef * hwDeviceContext_{NULL};
