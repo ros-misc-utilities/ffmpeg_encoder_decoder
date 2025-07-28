@@ -217,6 +217,15 @@ public:
    * \brief resets performance debugging timers. Poorly tested, may be broken.
    */
   void resetTimers();
+  /**
+   * \brief adds AVOption setting to list of options to be applied before opening the encoder
+   * \param key   name of AVOption to set, e.g. "preset"
+   * \param value value of AVOption e.g. "slow"
+   */
+  void addAVOption(const std::string & key, const std::string & value)
+  {
+    avOptions_.push_back({key, value});
+  }
 
   // ------------------- deprecated functions ---------------
   /**
@@ -234,11 +243,13 @@ private:
     const std::vector<std::string> & valid_decoders);
   int receiveFrame();
   int convertFrameToMessage(const AVFrame * frame, const ImagePtr & image);
+  void setAVOption(const std::string & field, const std::string & value);
 
   // --------------- variables
   rclcpp::Logger logger_;
   Callback callback_;
   PTSMap ptsToStamp_;
+  std::vector<std::pair<std::string, std::string>> avOptions_;
   // --- performance analysis
   bool measurePerformance_{false};
   TDiff tdiffTotal_;
