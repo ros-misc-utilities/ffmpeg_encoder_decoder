@@ -308,6 +308,12 @@ bool Decoder::initSingleDecoder(const std::string & decoder)
       }
     }
     codecContext_->pkt_timebase = timeBase_;
+    std::stringstream ss;
+    for (const auto & kv : avOptions_) {
+      setAVOption(kv.first, kv.second);
+      ss << " " << kv.first << "=" << kv.second;
+    }
+    RCLCPP_INFO(logger_, "using decoder %10s with options: %s", decoder.c_str(), ss.str().c_str());
 
     if (avcodec_open2(codecContext_, codec, NULL) < 0) {
       av_free(codecContext_);
@@ -484,6 +490,18 @@ void Decoder::resetTimers() { tdiffTotal_.reset(); }
 void Decoder::printTimers(const std::string & prefix) const
 {
   RCLCPP_INFO_STREAM(logger_, prefix << " total decode: " << tdiffTotal_);
+}
+
+void Decoder::setAVOption(const std::string & field, const std::string & value)
+{
+  if (!value.empty() && codecContext_ && codecContext_->priv_data) {
+    const int err =
+      av_opt_set(codecContext_->priv_data, field.c_str(), value.c_str(), AV_OPT_SEARCH_CHILDREN);
+    if (err != 0) {
+      RCLCPP_ERROR_STREAM(
+        logger_, "cannot set option " << field << " to value " << value << ": " << utils::err(err));
+    }
+  }
 }
 
 const std::unordered_map<std::string, std::string> & Decoder::getDefaultEncoderToDecoderMap()

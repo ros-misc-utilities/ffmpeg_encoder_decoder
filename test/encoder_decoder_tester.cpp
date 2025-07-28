@@ -145,8 +145,8 @@ void EncoderDecoderTester::imageCallback(
   EXPECT_EQ(img->step, orig->step);
   EXPECT_EQ(img->step * img->height, orig->data.size());
   EXPECT_GE(img->data.size(), 1);
-  const int num_channels = sensor_msgs::image_encodings::bitDepth(img->encoding) / 8;
-  const int num_orig_channels = sensor_msgs::image_encodings::bitDepth(orig->encoding) / 8;
+  const int num_channels = sensor_msgs::image_encodings::numChannels(img->encoding);
+  const int num_orig_channels = sensor_msgs::image_encodings::numChannels(orig->encoding);
   if (num_channels != num_orig_channels) {
     std::cerr << "num channel mismatch! orig: " << num_orig_channels << " vs now: " << num_channels
               << std::endl;

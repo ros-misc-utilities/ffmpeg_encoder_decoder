@@ -326,7 +326,7 @@ void Encoder::doOpenCodec(int width, int height, const std::string &)
 
 void Encoder::setAVOption(const std::string & field, const std::string & value)
 {
-  if (!value.empty()) {
+  if (!value.empty() && codecContext_ && codecContext_->priv_data) {
     const int err =
       av_opt_set(codecContext_->priv_data, field.c_str(), value.c_str(), AV_OPT_SEARCH_CHILDREN);
     if (err != 0) {
