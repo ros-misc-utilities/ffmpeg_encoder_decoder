@@ -105,29 +105,12 @@ public:
    * \brief Initializes the decoder for a given codec and libav decoder.
    *
    * Initializes the decoder, with multiple decoders to pick from.
-   * If the name of the libav decoder string is empty, a suitable libav decoder
-   * will be picked, or the initialization will fail if none is available.
    * \param codec  the codec (encoding) from the first packet. Can never change!
    * \param callback the function to call when frame has been decoded.
-   * \param decoder the name of the libav decoder to use. If empty string,
-   *                 the decoder will try to find a suitable one based on the encoding.
+   * \param decoder the name of the libav decoder to use.
    * \return true if initialized successfully.
    */
   bool initialize(const std::string & codec, Callback callback, const std::string & decoder);
-
-  /**
-   * \ brief initializes the decoder, trying different libavdecoders in order.
-   *
-   * Initialize decoder with multiple libav decoders to pick from.
-   * If decoders.empty() a default decoder will be chosen (if available).
-   * \param codec the codec (encoding) from the first packet. Can never change!
-   * \param callback the function to call when frame has been decoded.
-   * \param decoders names of the libav decoders to try sequentially. If empty()
-   *                 the decoder will try to find a suitable one based on the codec.
-   * \return true if successful
-   */
-  bool initialize(
-    const std::string & codec, Callback callback, const std::vector<std::string> & decoders);
 
   /**
    * \brief Sets the ROS output message encoding format.
@@ -197,9 +180,9 @@ public:
    * Finds the name of all hardware and software decoders (combined)
    * that match a certain codec (or encoder).
    * \param codec name of the codec, i.e. h264, hevc etc
-   * \return vector with names of matching libav decoders
+   * \return string with comma-separated list of libav decoders
    */
-  static std::vector<std::string> findDecoders(const std::string & codec);
+  static std::string findDecoders(const std::string & codec);
 
   /**
    * \brief Enables or disables performance measurements. Poorly tested, may be broken.
@@ -236,15 +219,12 @@ public:
   getDefaultEncoderToDecoderMap();
 
 private:
-  bool initSingleDecoder(const std::string & decoder);
-  bool initDecoder(const std::vector<std::string> & decoders);
-  std::vector<std::string> filterDecoders(
-    const std::string & encoding, const std::vector<std::string> & decoders,
-    const std::vector<std::string> & valid_decoders);
+  bool doInitDecoder(const std::string & encoding, const std::string & decoder);
+  bool initDecoder(const std::string & encoding, const std::string & decoders);
   int receiveFrame();
   int convertFrameToMessage(const AVFrame * frame, const ImagePtr & image);
   void setAVOption(const std::string & field, const std::string & value);
-
+  void setEncoding(const std::string & encoding);
   // --------------- variables
   rclcpp::Logger logger_;
   Callback callback_;

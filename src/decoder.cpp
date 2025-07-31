@@ -50,6 +50,7 @@ void Decoder::reset()
   outputFrame_ = NULL;
   hwPixFormat_ = AV_PIX_FMT_NONE;
   outputMsgEncoding_ = "";
+  packetEncoding_ = "";
 }
 
 void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
@@ -58,61 +59,29 @@ void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
   outputMsgEncoding_ = output_encoding;
 }
 
+static std::vector<std::string> splitEncoding(const std::string & encoding)
+{
+  return (utils::split_by_char(encoding, ';'));
+}
+
+void Decoder::setEncoding(const std::string & encoding)
+{
+  packetEncoding_ = encoding;
+  const auto split = splitEncoding(encoding);
+  if (outputMsgEncoding_.empty()) {
+    // assume orig was bgr8
+    outputMsgEncoding_ = split.size() == 4 ? split[3] : "bgr8";
+    RCLCPP_INFO_STREAM(
+      logger_,
+      "output image encoding: " << outputMsgEncoding_ << ((split.size() == 4) ? "" : " (default)"));
+  }
+}
+
 bool Decoder::initialize(
   const std::string & encoding, Callback callback, const std::string & decoder)
 {
-  return (initialize(
-    encoding, callback,
-    decoder.empty() ? std::vector<std::string>() : std::vector<std::string>{decoder}));
-}
-
-bool Decoder::initialize(
-  const std::string & encoding, Callback callback, const std::vector<std::string> & decoders)
-{
   callback_ = callback;
-  packetEncoding_ = encoding;
-  const auto split = utils::split_by_char(encoding, '/');
-  if (outputMsgEncoding_.empty()) {
-    // assume orig was bgr8
-    outputMsgEncoding_ = split.size() > 1 ? split[1] : "bgr8";
-    RCLCPP_INFO_STREAM(
-      logger_,
-      "output image encoding: " << outputMsgEncoding_ << ((split.size() > 1) ? "" : " (default)"));
-  }
-  const auto all_decoders = findDecoders(split[0]);
-  if (all_decoders.empty()) {
-    RCLCPP_ERROR_STREAM(logger_, "no decoders discovered for code:c " << split[0]);
-    throw(std::runtime_error("no decoders discovered for codec: " + split[0]));
-  }
-  if (decoders.empty()) {  // try all libav-discovered decoders
-    std::string decoders_str;
-    for (const auto & decoder : all_decoders) {
-      decoders_str += " " + decoder;
-    }
-    RCLCPP_INFO_STREAM(logger_, "trying discovered decoders in order:" << decoders_str);
-    return (initDecoder(all_decoders));
-  }
-  const auto good_decoders = filterDecoders(encoding, decoders, all_decoders);
-  if (good_decoders.empty()) {
-    return (false);
-  }
-  return (initDecoder(good_decoders));
-}
-
-std::vector<std::string> Decoder::filterDecoders(
-  const std::string & encoding, const std::vector<std::string> & decoders,
-  const std::vector<std::string> & valid_decoders)
-{
-  std::vector<std::string> good_decoders;
-  for (const auto & dec : decoders) {  // filter for decoders matching codec
-    if (std::find(valid_decoders.begin(), valid_decoders.end(), dec) != valid_decoders.end()) {
-      good_decoders.push_back(dec);
-    } else {
-      RCLCPP_WARN_STREAM(
-        logger_, "configured decoder: " << dec << " cannot handle encoding: " << encoding);
-    }
-  }
-  return (good_decoders);
+  return (initDecoder(encoding, decoder));
 }
 
 static AVBufferRef * hw_decoder_init(
@@ -232,46 +201,32 @@ enum AVPixelFormat get_format(struct AVCodecContext * avctx, const enum AVPixelF
   return AV_PIX_FMT_NONE;
 }
 
-bool Decoder::initDecoder(const std::vector<std::string> & decoders)
+bool Decoder::initDecoder(const std::string & encoding, const std::string & decoder)
 {
-  if (decoders.empty()) {
-    RCLCPP_ERROR_STREAM(logger_, "no decoders configured for this encoding!");
-    throw(std::runtime_error("no decoders configured for this encoding!"));
+  const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
+  if (!codec) {
+    RCLCPP_WARN_STREAM(logger_, "decoder " << decoder << " cannot decode " << encoding);
+    return (false);
   }
-  for (const auto & decoder : decoders) {
-    const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
-    if (codec) {
-      // use the decoder if it either is software, or has working
-      // hardware support
-      if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
-        const AVCodecHWConfig * hwConfig = avcodec_get_hw_config(codec, 0);
-        if (hwConfig) {
-          if (initSingleDecoder(decoder)) {
-            return (true);
-          }
-        } else {
-          RCLCPP_INFO_STREAM(logger_, "ignoring decoder with no hardware config: " << decoder);
-        }
-      } else {
-        if (initSingleDecoder(decoder)) {
-          return (true);
-        }
-      }
-    } else {
-      RCLCPP_WARN_STREAM(logger_, "unknown decoder: " << decoder);
+  // use the decoder if it either is software, or has working
+  // hardware support
+  const AVCodecHWConfig * hwConfig = nullptr;
+  if (codec->capabilities & AV_CODEC_CAP_HARDWARE) {
+    hwConfig = avcodec_get_hw_config(codec, 0);
+    if (!hwConfig) {
+      RCLCPP_INFO_STREAM(logger_, "ignoring decoder with no hardware config: " << decoder);
+      return (false);
     }
   }
-  if (decoders.size() > 1) {
-    RCLCPP_ERROR_STREAM(logger_, "none of these requested decoders works: ");
-    for (const auto & decoder : decoders) {
-      RCLCPP_ERROR_STREAM(logger_, "  " << decoder);
-    }
+  if (!doInitDecoder(encoding, decoder)) {
+    return (false);
   }
-  throw(std::runtime_error("cannot find matching decoder!"));
+  return (true);
 }
 
-bool Decoder::initSingleDecoder(const std::string & decoder)
+bool Decoder::doInitDecoder(const std::string & encoding, const std::string & decoder)
 {
+  setEncoding(encoding);
   try {
     const AVCodec * codec = avcodec_find_decoder_by_name(decoder.c_str());
     if (!codec) {
@@ -373,7 +328,6 @@ int Decoder::receiveFrame()
     }
   }
   AVFrame * frame = isAcc ? cpuFrame_ : swFrame_;
-
   if (frame->width == ctx->width && frame->height == ctx->height) {
     // prepare the decoded message
     ImagePtr image(new Image());
@@ -504,14 +458,6 @@ void Decoder::setAVOption(const std::string & field, const std::string & value)
   }
 }
 
-const std::unordered_map<std::string, std::string> & Decoder::getDefaultEncoderToDecoderMap()
-{
-  RCLCPP_INFO_STREAM(
-    rclcpp::get_logger("ffmpeg_decoder"),
-    "default map is deprecated, use findDecoders() or pass empty string instead!");
-  throw(std::runtime_error("default map is deprecated!"));
-}
-
 void Decoder::findDecoders(
   const std::string & codec, std::vector<std::string> * hw_decoders,
   std::vector<std::string> * sw_decoders)
@@ -519,11 +465,21 @@ void Decoder::findDecoders(
   utils::find_decoders(codec, hw_decoders, sw_decoders);
 }
 
-std::vector<std::string> Decoder::findDecoders(const std::string & codec)
+std::string Decoder::findDecoders(const std::string & codec)
 {
-  std::vector<std::string> sw_decoders, all_decoders;
-  utils::find_decoders(codec, &all_decoders, &sw_decoders);
-  all_decoders.insert(all_decoders.end(), sw_decoders.begin(), sw_decoders.end());
-  return (all_decoders);
+  return (utils::find_decoders(codec));
 }
+
+// -------------- deprecated, DO NOT USE ------------------
+const std::unordered_map<std::string, std::string> & Decoder::getDefaultEncoderToDecoderMap()
+{
+  static const std::unordered_map<std::string, std::string> defaultMap{
+    {{"h264_nvenc", "h264"},
+     {"libx264", "h264"},
+     {"hevc_nvenc", "hevc_cuvid"},
+     {"h264_nvmpi", "h264"},
+     {"h264_vaapi", "h264"}}};
+  return (defaultMap);
+}
+
 }  // namespace ffmpeg_encoder_decoder

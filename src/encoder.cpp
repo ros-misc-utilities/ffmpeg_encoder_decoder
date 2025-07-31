@@ -144,9 +144,6 @@ void Encoder::openHardwareDevice(
         logger_, "user overriding software pix fmt " << utils::pix(frames_ctx->sw_format));
       RCLCPP_INFO_STREAM(logger_, "with " << utils::pix(pixFormat_));
       frames_ctx->sw_format = pixFormat_;  // override default at your own risk!
-    } else {
-      RCLCPP_INFO_STREAM(
-        logger_, "using software pixel format: " << utils::pix(frames_ctx->sw_format));
     }
     if (frames_ctx->sw_format == AV_PIX_FMT_NONE) {
       av_buffer_unref(&hwframe_ctx_ref);
@@ -198,10 +195,9 @@ enum AVPixelFormat Encoder::findMatchingSourceFormat(
   return (utils::ros_to_av_pix_format(rosSrcFormat));
 }
 
-void Encoder::doOpenCodec(int width, int height, const std::string &)
+void Encoder::doOpenCodec(int width, int height, const std::string & origEncoding)
 {
   int err = 0;
-  encoding_ = codec_ + "/" + cvBridgeTargetFormat_;
 
   codecContext_ = nullptr;
   if (encoder_.empty()) {
@@ -255,6 +251,9 @@ void Encoder::doOpenCodec(int width, int height, const std::string &)
                                : utils::get_preferred_pixel_format(usesHardwareFrames_, pixFmts);
     codecContext_->sw_pix_fmt = codecContext_->pix_fmt;
   }
+  avSourcePixelFormat_ = utils::pix(codecContext_->sw_pix_fmt);
+  RCLCPP_INFO_STREAM(logger_, "using av_source_pixel_format: " << avSourcePixelFormat_);
+
   std::stringstream ss;
   for (const auto & kv : avOptions_) {
     setAVOption(kv.first, kv.second);
@@ -322,6 +321,8 @@ void Encoder::doOpenCodec(int width, int height, const std::string &)
       throw(std::runtime_error("cannot allocate sws context"));
     }
   }
+  encoding_ = codec_ + ";" + avSourcePixelFormat_ + ";" + cvBridgeTargetFormat_ + ";" +
+              (origEncoding.empty() ? cvBridgeTargetFormat_ : origEncoding);
 }
 
 void Encoder::setAVOption(const std::string & field, const std::string & value)
