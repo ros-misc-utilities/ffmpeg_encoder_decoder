@@ -113,6 +113,23 @@ void find_decoders(
   std::vector<std::string> * sw_decoders);
 
 /**
+ * \brief finds the names of all available decoders
+ *        for a given codec (or encoder)
+ * \param codec the codec / encoding to find decoders for
+ * \return string with comma separated list of libav decoder names
+ */
+
+std::string find_decoders(const std::string & codec);
+/**
+ * \brief filters a string with comma-separated decoders and
+ *
+ * \param codec the codec / encoding to filter for
+ * \param decoders string with comma-separated list of decoder names
+ * \return string with comma separated list of libav decoder names
+ */
+std::string filter_decoders(const std::string & codec, const std::string & decoders);
+
+/**
  * \brief gets list of names of all libav supported device types
  *
  * This is not the list of devices present on the host machine, just

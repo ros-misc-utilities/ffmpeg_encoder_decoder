@@ -28,9 +28,9 @@ TEST(ffmpeg_encoder_decoder, encoder_decoder_bgr8)
   tester.setCVBridgeTargetFormat(orig_enc);
   // encoder only supports bgr0, bgr24, rgb24
   // tester.setAVSourcePixelFormat("bgr24"); // automatically picked
-  tester.setExpectedPacketEncoding("h264/" + orig_enc);
   tester.addAVOption("crf", "0");  // needed for lossless
   // decoding options
+  tester.setExpectedPacketEncoding("h264;bgr24;" + orig_enc + ";" + orig_enc);
   tester.setFinalROSEncoding(orig_enc);
   tester.setDecoder("h264");                  // codec == encoder in this case
   tester.setDecoderExpectedAVPixFmt("gbrp");  // picked by decoder
@@ -48,7 +48,7 @@ TEST(ffmpeg_encoder_decoder, encoder_decoder_mono)
   tester.setCVBridgeTargetFormat(orig_enc);
   tester.setAVSourcePixelFormat("gray");
   tester.addAVOption("x265-params", "lossless=1");
-  tester.setExpectedPacketEncoding("hevc/" + orig_enc);
+  tester.setExpectedPacketEncoding("hevc;gray;" + orig_enc + ";" + orig_enc);
   tester.addAVOption("crf", "0");  // may not be needed for lossless
   // decoding options
   tester.setFinalROSEncoding(orig_enc);
@@ -73,7 +73,7 @@ TEST(ffmpeg_encoder_decoder, encoder_decoder_bayer)
   // color conversion, and do this losslessly.
   // tester.setAVSourcePixelFormat("yuv420p"); // not needed
   tester.addAVOption("x265-params", "lossless=1");
-  tester.setExpectedPacketEncoding("hevc/" + orig_enc);
+  tester.setExpectedPacketEncoding("hevc;yuv420p;" + orig_enc + ";" + orig_enc);
   // --- decoding options
   tester.setFinalROSEncoding(orig_enc);
   tester.setDecoder("hevc");

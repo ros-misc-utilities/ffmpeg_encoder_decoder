@@ -294,6 +294,35 @@ void find_decoders(
   find_decoders(real_encoding, sw_decoders, false);
 }
 
+std::string find_decoders(const std::string & codec)
+{
+  std::string decoders;
+  std::vector<std::string> hw_dec;
+  std::vector<std::string> sw_dec;
+  find_decoders(codec, &hw_dec, &sw_dec);
+  for (const auto & s : hw_dec) {
+    decoders += (decoders.empty() ? "" : ",") + s;
+  }
+  for (const auto & s : sw_dec) {
+    decoders += (decoders.empty() ? "" : ",") + s;
+  }
+  return decoders;
+}
+
+std::string filter_decoders(const std::string & codec, const std::string & decoders)
+{
+  std::string filtered;
+  const auto valid_decoders = split_by_char(find_decoders(codec), ',');
+  for (const auto & dec : split_by_char(decoders, ',')) {
+    for (const auto & valid : valid_decoders) {
+      if (dec == valid) {
+        filtered += (filtered.empty() ? "" : ",") + dec;
+      }
+    }
+  }
+  return (filtered);
+}
+
 std::string find_codec(const std::string & encoder)
 {
   const AVCodec * c = find_by_name(encoder);

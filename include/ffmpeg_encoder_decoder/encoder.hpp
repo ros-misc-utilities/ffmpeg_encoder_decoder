@@ -269,7 +269,8 @@ public:
    * \param callback the function to call for handling encoded packets
    * \param encoding the ros encoding string, e.g. bayer_rggb8, rgb8 ...
    */
-  bool initialize(int width, int height, Callback callback, const std::string & encoding);
+  bool initialize(
+    int width, int height, Callback callback, const std::string & encoding = std::string());
   /**
    * \brief sets ROS logger to use for info/error messages
    * \param logger the logger to use for messages
@@ -383,6 +384,7 @@ private:
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
   bool usesHardwareFrames_{false};
+  std::string avSourcePixelFormat_;
   // ------ libav state
   AVCodecContext * codecContext_{nullptr};
   AVBufferRef * hwDeviceContext_{nullptr};
