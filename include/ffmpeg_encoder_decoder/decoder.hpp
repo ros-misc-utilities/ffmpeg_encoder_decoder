@@ -55,8 +55,9 @@ ffmpeg_image_transport_msgs::msg::FFMPEGPacket msg;
 msg.header.frame_id = "frame_id";
 msg.width = 640;
 msg.height = 480;
+msg.step = 640 * 3;
 msg.encoding = "hevc";
-msg.data.resize(10000, 0);  // Obviously this is not a valid packet!!!
+msg.data.resize(msg.height * msg.step, 0); // not valid data!
 
 if (!decoder.isInitialized()) {
   decoder.initialize(msg.encoding, imageCallback, "hevc_cuvid");

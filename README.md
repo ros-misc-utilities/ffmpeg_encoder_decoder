@@ -4,7 +4,8 @@ This ROS2 package supports encoding/decoding with the FFMpeg
 library, for example encoding h264 and h265 or HEVC, using
 Nvidia or other hardware acceleration when available.
 This package is meant to be used by image transport plugins like
-the [ffmpeg image transport](https://github.com/ros-misc-utilities/ffmpeg_image_transport/).
+the [ffmpeg image transport](https://github.com/ros-misc-utilities/ffmpeg_image_transport/)
+and the [foxglove compressed video transport](https://github.com/ros-misc-utilities/foxglove_compressed_video_transport/).
 
 ## Supported systems
 
@@ -12,6 +13,7 @@ Continuous integration is tested under Ubuntu with the following ROS2 distros:
 
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64&subject=Humble)](https://build.ros2.org/job/Hdev__ffmpeg_encoder_decoder__ubuntu_jammy_amd64/)
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Jazzy)](https://build.ros2.org/job/Jdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
+ [![Build Status](https://build.ros2.org/buildStatus/icon?job=Kdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Kilted)](https://build.ros2.org/job/Kdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
  [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64&subject=Rolling)](https://build.ros2.org/job/Rdev__ffmpeg_encoder_decoder__ubuntu_noble_amd64/)
 
 
@@ -34,10 +36,59 @@ and follow the [instructions here](https://github.com/ros-misc-utilities/.github
 
 Make sure to source your workspace's ``install/setup.bash`` afterwards.
 
-## ROS Parameters
+## API overview
 
-This package does not expose ROS parameters. It is the upper layer's responsibility to e.g. manage the mapping between encoder and decoder, i.e. to tell the decoder class which libav decoder should be used for the decoding, or to set the encoding parameters.
+### Preliminaries
+When using libav it is important to understand the difference between the encoder and the codec.
+The *codec* is the standardized format in which images are encoded, for instance ``h264`` or ``hevc``.
+The *encoder* is a libav software module that can encode images for a given codec. For instance ``libx264``, ``libx264rgb``,
+ `h264_nvenc``, and ``h264_vaapi`` are all *encoders* that encode for the *codec* h264.
+Some of the encoders are hardware accelerated, some can handle more image formats than others, but in the end they all encode video for a specific codec.
 
+For the many AV options available for various libav encoders, and for ``qmax``, ``bit_rate`` and similar settings please refer to the ffmpeg documentation.
+
+### The inner workings
+![overview_diagram](./doc/encoder_decoder.svg)
+
+The diagram above shows the stations that a ROS Image message passes as it traverses the encoder and decoder.
+1) The ROS image (with [ROS sensor\_msgs/Image encoding](https://github.com/ros2/common_interfaces/blob/a2ef867438e6d4eed074d6e3668ae45187e7de86/sensor_msgs/include/sensor_msgs/image_encodings.hpp)) is first converted with the ROS [cv\_bridge](https://github.com/ros-perception/vision_opencv) into the ``cv_bridge_target_format``.
+ This conversion is necessary because some ROS encodings (like bayer images) are not supported by libswscale.
+ The ``cv_bridge_target_format`` can be set via ``setCVBridgeTargetFormat(const std::string & fmt)``.
+ If this format is not set explicitly the image will be converted to the default format of ``bgr8``.
+ This may not be what you want for e.g. ``mono8`` (gray) or Bayer images.
+ Ideally the``cv_bridge_target_format`` can be directly used by the libav decoder so the next step becomes a no-op.
+ But at the very least ``cv_bridge_target_format`` must be an acceptable libswscale input format (with the exception of
+ special hacks for encoding single-channel images, see below).
+2) The image is then converted to ``av_source_pixel_format`` using libswscale.
+ The ``av_source_pixel_format`` can be set with ``setAVSourcePixelFormat()``, defaulting to something that is acceptable to the libav encoder.
+ You can use ffmpeg (``ffmpeg -h encoder=libx264 | grep formats``) to list all formats that an encoder supports.
+ Note that the ffmpeg/libav format string notation is different from the ROS encoding strings, and the ``av_source_pixel_format`` is specified using the libav convention, whereas the ``cv_bridge_target_format`` uses ROS convention!
+ (If you choose to bypass the cv\_bridge conversion from step 1 by feeding the images to the encoder directly via the ``encodeImage(const cv::Mat & img ...)`` method, you must still set the ``cv_bridge_target_format`` such that the encoder knows what format the ``img`` argument has.)
+ When aiming for lossless compression, beware of any ``av_source_pixel_format`` that reduces the color resolution, such as ``yuv420p``, ``nv12`` etc.
+ For Bayer images, use the special hack for single-channel images.
+
+3) The libav encoder encodes the packet with its supported codec, e.g. the ``libx264`` will produce ``h264`` packets.
+ The ``encoding`` field of the FFMPEGPacket message will document all image format conversions and the codec, in reverse order, separated by semicolon.
+ This way the decoder can attempt to reproduce the original ``ros_encoding``.
+
+4) The libav decoder decodes the packet into the original ``av_source_pixel_format``.
+
+5) Finally the image is converted to ``output_message_format`` using libswscale.
+ This format can be set (in ROS encoding syntax!) with ``setOutputMessageEncoding()``.
+ The format must be supported by both ROS and libswscale (except when using the special hack for single-channel images).
+
+Note that only very few combinations of libav encoders, ``cv_bridge_target_format`` and ``av_source_pixel_format`` have been tested. Please provide feedback if you observe crashes or find obvious bugs. PRs are always appreciated!
+
+### The special single-channel hack
+
+Many libav encoders do not support single-channel formats (like mono8 or bayer).
+For this reason a special hack is implemented in the encoder that adds an empty (zero-value) color channel to the single-channel image.
+Later, the decoder removes it again.
+To utilitze this hack, specify a ``cv_bridge_target_format`` of e.g. ``bayer_rggb8``. Without the special hack, this would trigger an error because Bayer formats are not acceptable to libswscale.
+Instead, the image is converted to ``yuv420p`` or ``nv12`` by adding an empty color channel.
+These formats are acceptable to most encoders.
+The decoder in turn recognizes that the ``cv_bridge_target_format`` is a single-channel format, but ``yuv420p``/``nv12`` are not, and therefore drops the color channel.
+This hack greatly improves the efficiency for lossless encoding of Bayer images because it avoids conversion to full RGB and back. 
 
 ## API usage
 
@@ -53,42 +104,15 @@ Using the encoder involves the following steps:
 - flushing the encoder (may result in additional callbacks with encoded packets)
 - destroying the ``Encoder`` object.
 
-The ``Encoder`` class description has a short example code snippet.
-
-When using libav it is important to understand the difference between the encoder and the codec. The *codec* is the standardized format in which images are encoded, for instance ``h264`` or ``hevc``. The *encoder* is a software module that can encode images for a given codec. For instance ``libx264``, ``libx264rgb``, ``h264_nvenc``, and ``h264_vaapi`` are all *encoders* that encode for the *codec* h264.
-Some of the encoders are hardware accelerated, some can handle more image formats than others, but in the end they all encode video for a specific codec. You set the libav encoder with the ``setEncoder()`` method.
-
-For the many AV options available for various libav encoders, and for ``qmax``, ``bit_rate`` and similar settings please refer to the ffmpeg documentation.
-
-The topic of "pixel formats" (also called "encodings") can be very confusing and frustrating, so here a few lines about it.
-- Images in ROS arrive as messages that are encoded in one of the formats allowed by the [sensor\_msgs/Image encodings](https://github.com/ros2/common_interfaces/blob/a2ef867438e6d4eed074d6e3668ae45187e7de86/sensor_msgs/include/sensor_msgs/image_encodings.hpp). If you pass that message in via the ``encodeImage(const Image & msg)`` message, it will first will be converted to an opencv matrix using the [cv_bridge](https://github.com/ros-perception/vision_opencv).
-If you don't set the ``cv_bridge_target_format`` via ``setCVBridgeTargetFormat(const std::string & fmt)``, the image will be converted to the default format of ``bgr8``. Depending on how performance sensitive you are (or if you have a ``mono8`` (gray) image!), this may not be what you want. Ideally, you should pick a ``cv_bridge_target_format`` that can be directly used by the libav decoder that you have chosen. You can use ffmpeg to list the formats that the libav encoder directly supports:
-  ```
-  ffmpeg -h encoder=libx264 | grep formats
-  ```
-  Note that the ffmpeg/libav format strings often diverge from the ROS encoding strings, so some guesswork and experimentation may be necessary to pick the right ``cv_bridge_target_format``.
-  If you choose to bypass the cv\_bridge conversion by feeding the images to the encoder directly via the ``encodeImage(const cv::Mat & img ...)`` method, you must still set the ``cv_bridge_target_format`` such that encoder knows what format the ``img`` argument has.
-- Once the image is available in ``cv_bridge_target_format`` the encoder may perform another conversion to an image format that the libav encoder supports, the ``av_source_pixel_format``. Again, ``ffmpeg -h encoder=<your encoder>`` shows the supported formats. If you don't set the ``av_source_pixel_format`` with ``setAVSourcePixelFormat()``, the encoder will try to pick one that is supported by the libav encoder. That often works but may not be optimal.
-- Finally, the libav encoder produces a packet in its output codec, e.g. ``h264``, ``hevc`` etc. This encoding format is provided as the ``codec`` parameter when the encoder calls back with the encoded packet. Later, the codec needs to be provided to the decoder so it can pick a suitable libav decoder.
-
-To summarize, the conversion goes as follows:
-```
-<ros_message> -> cv_bridge_target_format -> av_source_pixel_format --(libav encoder)--> codec
-```
-By properly choosing ``cv_bridge_target_format`` and ``av_source_pixel_format`` two of those conversions
-may become no-ops, but to what extend the cv\_bridge and libav actually recognize and optimize for this has not been looked into yet.
-
-Note that only very few combinations of libav encoders, ``cv_bridge_target_format`` and ``av_source_pixel_format`` have been tested. Please provide feedback if you observe crashes or find obvious bugs. PRs are always appreciated!
+The ``Encoder`` class API description has a short example code snippet.
 
 ### Decoder
 
 Using the decoder involves the following steps:
 - instantiating the ``Decoder`` object.
 - if so desired, setting the ROS output (image encoding) format.
-- initializing the decoder object. For this you need to know the encoding (codec, e.g. "h264").
-  During initialization you also have to present an ordered list of libav decoders that
-  should be used. If an empty list is provided, the decoder will attempt to find a suitable
-  libav decoder based on the encoding, with a preference for hardware accelerated decoding.
+- initializing the decoder object. For this you need to know the encoding (codec, e.g. "h264"),
+  and you have to specify the libav decoder name (e.g. "h264_cuvid").
 - feeding encoded packets to the decoder (and handling the callbacks
   when decoded images become available)
 - flushing the decoder (may result in additional callbacks with decoded images)
@@ -126,20 +150,8 @@ depth=1 &&cd jetson-ffmpeg && ./ffpatch.sh ../ffmpeg && cd ../ffmpeg && ./config
 
 Then follow the section above on how to
 actually use that custom ffmpeg library. As always first test on the
-CLI that the newly compiled ``ffmpeg`` command now supports
-``h264_nvmpi``. The transport can then be configured to use
-nvmpi like so:
+CLI that the newly compiled ``ffmpeg`` command now supports ``h264_nvmpi``.
 
-```
-        parameters=[{'ffmpeg_image_transport.encoding': 'h264_nvmpi',
-                     'ffmpeg_image_transport.profile': 'main',
-                     'ffmpeg_image_transport.preset': 'll',
-                     'ffmpeg_image_transport.gop_size': 15}]
-```
-Sometimes the ffmpeg parameters show up under different names. If the above
-settings don't work, try the command ``ros2 param dump <name_of_your_node>``
-*after* subscribing to the ffmpeg image topic with e.g. ``ros2 topic hz``.
-From the output you can see what the correct parameter names are.
 ## License
 
 This software is issued under the Apache License Version 2.0.
