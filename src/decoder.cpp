@@ -27,9 +27,15 @@ namespace ffmpeg_encoder_decoder
 
 Decoder::Decoder() : logger_(rclcpp::get_logger("Decoder")) {}
 
-Decoder::~Decoder() { reset(); }
+Decoder::~Decoder() { resetNoLock(); }
 
 void Decoder::reset()
+{
+  Lock lock(mutex_);
+  resetNoLock();
+}
+
+void Decoder::resetNoLock()
 {
   if (codecContext_) {
     avcodec_free_context(&codecContext_);
@@ -55,6 +61,7 @@ void Decoder::reset()
 
 void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
 {
+  Lock lock(mutex_);
   RCLCPP_INFO_STREAM(logger_, "forcing output encoding: " << output_encoding);
   outputMsgEncoding_ = output_encoding;
 }
@@ -80,6 +87,7 @@ void Decoder::setEncoding(const std::string & encoding)
 bool Decoder::initialize(
   const std::string & encoding, Callback callback, const std::string & decoder)
 {
+  Lock lock(mutex_);
   callback_ = callback;
   return (initDecoder(encoding, decoder));
 }
@@ -282,7 +290,7 @@ bool Decoder::doInitDecoder(const std::string & encoding, const std::string & de
     outputFrame_ = av_frame_alloc();
   } catch (const std::runtime_error & e) {
     RCLCPP_ERROR_STREAM(logger_, e.what());
-    reset();
+    resetNoLock();
     return (false);
   }
   RCLCPP_INFO_STREAM(logger_, "decoding with " << decoder);
@@ -291,6 +299,7 @@ bool Decoder::doInitDecoder(const std::string & encoding, const std::string & de
 
 bool Decoder::flush()
 {
+  Lock lock(mutex_);
   if (!codecContext_) {
     return (false);
   }
@@ -395,7 +404,8 @@ bool Decoder::decodePacket(
   const std::string & encoding, const uint8_t * data, size_t size, uint64_t pts,
   const std::string & frame_id, const rclcpp::Time & stamp)
 {
-  if (!isInitialized()) {
+  Lock lock(mutex_);
+  if (codecContext_ == nullptr) {
     RCLCPP_ERROR_STREAM(logger_, "decoder is not initialized!");
     return (false);
   }
@@ -439,10 +449,15 @@ bool Decoder::decodePacket(
   return (rret == AVERROR(EAGAIN));
 }
 
-void Decoder::resetTimers() { tdiffTotal_.reset(); }
+void Decoder::resetTimers()
+{
+  Lock lock(mutex_);
+  tdiffTotal_.reset();
+}
 
 void Decoder::printTimers(const std::string & prefix) const
 {
+  Lock lock(mutex_);
   RCLCPP_INFO_STREAM(logger_, prefix << " total decode: " << tdiffTotal_);
 }
 
