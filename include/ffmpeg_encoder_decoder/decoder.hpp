@@ -21,8 +21,10 @@
 #include <ffmpeg_encoder_decoder/types.hpp>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 extern "C" {
@@ -92,7 +94,7 @@ public:
   Decoder();
 
   /**
-   * \brief Destructor. Calls reset();
+   * \brief Destructor.
    */
   ~Decoder();
 
@@ -100,7 +102,11 @@ public:
    * Test if decoder is initialized.
    * \return true if the decoder is initialized.
    */
-  bool isInitialized() const { return (codecContext_ != NULL); }
+  bool isInitialized() const
+  {
+    Lock lock(mutex_);
+    return (codecContext_ != NULL);
+  }
 
   /**
    * \brief Initializes the decoder for a given codec and libav decoder.
@@ -160,7 +166,43 @@ public:
    * \brief Overrides the default ("Decoder") logger.
    * \param logger the logger to override the default ("Decoder") with.
    */
-  void setLogger(rclcpp::Logger logger) { logger_ = logger; }
+  void setLogger(rclcpp::Logger logger)
+  {
+    Lock lock(mutex_);
+    logger_ = logger;
+  }
+
+  /**
+   * \brief Enables or disables performance measurements. Poorly tested, may be broken.
+   * \param p set to true to enable performance debugging.
+   */
+  void setMeasurePerformance(bool p)
+  {
+    Lock lock(mutex_);
+    measurePerformance_ = p;
+  }
+
+  /**
+   * \brief Prints performance timers. Poorly tested, may be broken.
+   * \param prefix for labeling the printout
+   */
+  void printTimers(const std::string & prefix) const;
+
+  /**
+   * \brief resets performance debugging timers. Poorly tested, may be broken.
+   */
+  void resetTimers();
+
+  /**
+   * \brief adds AVOption setting to list of options to be applied before opening the encoder
+   * \param key   name of AVOption to set, e.g. "preset"
+   * \param value value of AVOption e.g. "slow"
+   */
+  void addAVOption(const std::string & key, const std::string & value)
+  {
+    Lock lock(mutex_);
+    avOptions_.push_back({key, value});
+  }
 
   /**
    * \brief Finds all hardware and software decoders for a given codec.
@@ -185,32 +227,6 @@ public:
    */
   static std::string findDecoders(const std::string & codec);
 
-  /**
-   * \brief Enables or disables performance measurements. Poorly tested, may be broken.
-   * \param p set to true to enable performance debugging.
-   */
-  void setMeasurePerformance(bool p) { measurePerformance_ = p; }
-
-  /**
-   * \brief Prints performance timers. Poorly tested, may be broken.
-   * \param prefix for labeling the printout
-   */
-  void printTimers(const std::string & prefix) const;
-
-  /**
-   * \brief resets performance debugging timers. Poorly tested, may be broken.
-   */
-  void resetTimers();
-  /**
-   * \brief adds AVOption setting to list of options to be applied before opening the encoder
-   * \param key   name of AVOption to set, e.g. "preset"
-   * \param value value of AVOption e.g. "slow"
-   */
-  void addAVOption(const std::string & key, const std::string & value)
-  {
-    avOptions_.push_back({key, value});
-  }
-
   // ------------------- deprecated functions ---------------
   /**
    * \deprecated Use findDecoders(codec) instead.
@@ -220,17 +236,20 @@ public:
   getDefaultEncoderToDecoderMap();
 
 private:
+  using Lock = std::unique_lock<std::mutex>;
   bool doInitDecoder(const std::string & encoding, const std::string & decoder);
   bool initDecoder(const std::string & encoding, const std::string & decoders);
   int receiveFrame();
   int convertFrameToMessage(const AVFrame * frame, const ImagePtr & image);
   void setAVOption(const std::string & field, const std::string & value);
   void setEncoding(const std::string & encoding);
+  void resetNoLock();
   // --------------- variables
   rclcpp::Logger logger_;
   Callback callback_;
   PTSMap ptsToStamp_;
   std::vector<std::pair<std::string, std::string>> avOptions_;
+  mutable std::mutex mutex_;
   // --- performance analysis
   bool measurePerformance_{false};
   TDiff tdiffTotal_;
