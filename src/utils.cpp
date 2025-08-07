@@ -213,7 +213,8 @@ enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt)
   const auto it = ros_to_av_pix_map.find(ros_pix_fmt);
   if (it == ros_to_av_pix_map.end()) {
     RCLCPP_ERROR_STREAM(
-      rclcpp::get_logger("encoder"), "no AV pixel format known for ros format " << ros_pix_fmt);
+      rclcpp::get_logger("encoder/decoder"),
+      "no AV pixel format known for ros format " << ros_pix_fmt);
     throw(std::runtime_error("no matching pixel format found for: " + ros_pix_fmt));
   }
   return (it->second);
@@ -314,10 +315,18 @@ std::string filter_decoders(const std::string & codec, const std::string & decod
   std::string filtered;
   const auto valid_decoders = split_by_char(find_decoders(codec), ',');
   for (const auto & dec : split_by_char(decoders, ',')) {
+    bool found = false;
     for (const auto & valid : valid_decoders) {
       if (dec == valid) {
         filtered += (filtered.empty() ? "" : ",") + dec;
+        found = true;
+        break;
       }
+    }
+    if (!found) {
+      RCLCPP_WARN_STREAM(
+        rclcpp::get_logger("encoder/decoder"),
+        "ignoring invalid decoder " << dec << " for codec " << codec);
     }
   }
   return (filtered);
