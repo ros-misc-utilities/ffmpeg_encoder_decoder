@@ -266,6 +266,16 @@ std::vector<std::string> split_by_char(const std::string & str_list, const char 
   return (split);
 }
 
+std::vector<std::string> split_decoders(const std::string & decoder_list)
+{
+  return (split_by_char(decoder_list, ','));
+}
+
+std::vector<std::string> split_encoding(const std::string & encoding)
+{
+  return (split_by_char(encoding, ';'));
+}
+
 // This function finds the encoding that is the target of a given encoder.
 
 static AVCodecID find_id_for_encoder_or_encoding(const std::string & encoder)
@@ -313,8 +323,8 @@ std::string find_decoders(const std::string & codec)
 std::string filter_decoders(const std::string & codec, const std::string & decoders)
 {
   std::string filtered;
-  const auto valid_decoders = split_by_char(find_decoders(codec), ',');
-  for (const auto & dec : split_by_char(decoders, ',')) {
+  const auto valid_decoders = split_decoders(find_decoders(codec));
+  for (const auto & dec : split_decoders(decoders)) {
     bool found = false;
     for (const auto & valid : valid_decoders) {
       if (dec == valid) {

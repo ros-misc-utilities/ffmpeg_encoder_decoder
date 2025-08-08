@@ -66,15 +66,10 @@ void Decoder::setOutputMessageEncoding(const std::string & output_encoding)
   outputMsgEncoding_ = output_encoding;
 }
 
-static std::vector<std::string> splitEncoding(const std::string & encoding)
-{
-  return (utils::split_by_char(encoding, ';'));
-}
-
 void Decoder::setEncoding(const std::string & encoding)
 {
   packetEncoding_ = encoding;
-  const auto split = splitEncoding(encoding);
+  const auto split = ffmpeg_encoder_decoder::utils::split_encoding(encoding);
   if (outputMsgEncoding_.empty()) {
     // assume orig was bgr8
     outputMsgEncoding_ = split.size() == 4 ? split[3] : "bgr8";
