@@ -138,13 +138,15 @@ if(BUILD_TESTING)
   ament_pep257()
   ament_xmllint()
 
+  find_package(ffmpeg_image_transport_msgs)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(${PROJECT_NAME}_encoder_test test/encoder_test.cpp
+  ament_add_gtest(${PROJECT_NAME}_test test/encoder_decoder_test.cpp test/encoder_decoder_tester.cpp
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/test)
-    target_include_directories(${PROJECT_NAME}_encoder_test PUBLIC
+  target_include_directories(${PROJECT_NAME}_test PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-  target_link_libraries(${PROJECT_NAME}_encoder_test ${PROJECT_NAME})
+  target_link_libraries(${PROJECT_NAME}_test
+    ${ffmpeg_image_transport_msgs_TARGETS} ${PROJECT_NAME})
 endif()
 
 ament_export_include_directories(include)
