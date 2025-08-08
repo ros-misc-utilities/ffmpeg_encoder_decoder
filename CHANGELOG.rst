@@ -2,8 +2,8 @@
 Changelog for package ffmpeg_encoder_decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+3.0.0 (2025-08-08)
+------------------
 * added utility functions for splitting
 * better error message when filtering decoder
 * use mutex to make thread safe
