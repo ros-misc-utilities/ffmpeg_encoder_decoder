@@ -175,6 +175,21 @@ std::vector<std::string> split_by_char(const std::string & str_list, const char 
  * \return true if ROS encoding is single channel and color format is like NV12/yuv420p
  */
 bool encode_single_channel_as_color(const std::string & encoding, enum AVPixelFormat fmt);
+
+/**
+ * \brief splits a string with a list of decoders
+ * \param decoder_list comma-separated list of decoders
+ * \return vector of separated strings
+ */
+std::vector<std::string> split_decoders(const std::string & decoder_list);
+
+/**
+ * \brief splits a string with an encoding ("codec;fmt;fmt;fmt")
+ * \param encoding string with encoding information
+ * \return vector of separated strings
+ */
+std::vector<std::string> split_encoding(const std::string & encoding);
+
 }  // namespace utils
 }  // namespace ffmpeg_encoder_decoder
 #endif  // FFMPEG_ENCODER_DECODER__UTILS_HPP_
