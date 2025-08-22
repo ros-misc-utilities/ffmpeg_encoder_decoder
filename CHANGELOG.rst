@@ -2,8 +2,8 @@
 Changelog for package ffmpeg_encoder_decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+3.0.1 (2025-08-22)
+------------------
 * new CI workflow
 * Contributors: Bernd Pfrommer
 
