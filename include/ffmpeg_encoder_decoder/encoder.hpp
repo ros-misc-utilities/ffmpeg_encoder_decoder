@@ -280,6 +280,10 @@ public:
    * \brief completely resets the state of the encoder.
    */
   void reset();
+  /**
+   * \brief encodes image message. May produce callbacks.
+   * \param msg the image message to encode
+   */
   void encodeImage(const Image & msg);
   /**
   * \brief flush all packets (produces callbacks).
@@ -340,10 +344,13 @@ public:
     setAVSourcePixelFormat(fmt);
   }
   /**
-   * \deprecated use encodeImage(const Image &msg) instead.
+   * \brief encodes image into ffmpeg message. May produce callbacks.
+   * \param img openCV matrix representing image to be encoded
+   * \param header frame_id and stamp are used to generate ffmpeg packet message
+   * \param t0 start time for performance timing. Set to rclcpp::Clock().now()
    */
-  [[deprecated("use encodeImage(const Image &msg) instead.")]] void encodeImage(
-    const cv::Mat & img, const Header & header, const rclcpp::Time & t0);
+  void encodeImage(
+    const cv::Mat & img, const Header & header, const rclcpp::Time & t0 = rclcpp::Clock().now());
   /**
   * flush all packets (produces callbacks).
   * \deprecated Only header.frame_id is used. Used flush(frame_id) now.
