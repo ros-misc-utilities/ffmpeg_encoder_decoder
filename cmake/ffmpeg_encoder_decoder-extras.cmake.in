@@ -1,5 +1,7 @@
 set(FFMPEG_PKGCONFIG "" CACHE STRING "extra path to pkgconfig")
-set(ENV{PKG_CONFIG_PATH} ${FFMPEG_PKGCONFIG})
+if(NOT "${FFMPEG_PKGCONFIG}" STREQUAL "")
+  set(ENV{PKG_CONFIG_PATH} "${FFMPEG_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
+endif()
 
 find_package(PkgConfig REQUIRED)
 
