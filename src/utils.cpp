@@ -199,10 +199,10 @@ static const std::unordered_map<std::string, enum AVPixelFormat> ros_to_av_pix_m
   {"bgra16", AV_PIX_FMT_BGRA64LE},
   {"mono8", AV_PIX_FMT_GRAY8},
   {"mono16", AV_PIX_FMT_GRAY16LE},
-  {"yuv422", AV_PIX_FMT_YUV422P},           // deprecated, not sure correct
-  {"uyvy", AV_PIX_FMT_UYVY422},             // not sure that is correct
-  {"yuyv", AV_PIX_FMT_YUYV422},             // not sure that is correct
-  {"yuv422_yuy2", AV_PIX_FMT_YUV422P16LE},  // deprecated, probably wrong
+  {"yuv422", AV_PIX_FMT_UYVY422},  // deprecated alias of uyvy
+  {"uyvy", AV_PIX_FMT_UYVY422},
+  {"yuyv", AV_PIX_FMT_YUYV422},
+  {"yuv422_yuy2", AV_PIX_FMT_YUYV422},  // deprecated alias of yuyv
   {"nv21", AV_PIX_FMT_NV21},
   {"nv24", AV_PIX_FMT_NV24},
   {"nv12", AV_PIX_FMT_NV12}  // not an official ROS encoding!!
