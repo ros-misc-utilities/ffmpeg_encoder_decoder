@@ -323,7 +323,7 @@ void Encoder::doOpenCodec(int width, int height, const std::string & origEncodin
     swsContext_ = sws_getContext(
       width, height, static_cast<AVPixelFormat>(wrapperFrame_->format),  // src
       width, height, static_cast<AVPixelFormat>(frame_->format),         // dest
-      SWS_FAST_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+      SWS_FAST_BILINEAR | (accurateRounding_ ? SWS_ACCURATE_RND : 0), NULL, NULL, NULL);
     if (!swsContext_) {
       throw(std::runtime_error("cannot allocate sws context"));
     }
