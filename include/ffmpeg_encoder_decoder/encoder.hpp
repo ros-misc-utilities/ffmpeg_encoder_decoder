@@ -253,6 +253,20 @@ public:
     Lock lock(mutex_);
     measurePerformance_ = p;
   }
+  /**
+   * \brief Enables or disables exact rounding in the libswscale conversion
+   *
+   * Exact rounding (SWS_ACCURATE_RND) is slower because it disables some of
+   * the optimized libswscale conversion routines. Must be set before calling
+   * initialize(). Default: false.
+   *
+   * \param b true enables exact rounding
+   */
+  void setAccurateRounding(bool b)
+  {
+    Lock lock(mutex_);
+    accurateRounding_ = b;
+  }
   // ------- related to teardown and startup
   /**
    * \brief test if encoder is initialized
@@ -392,6 +406,7 @@ private:
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
   bool usesHardwareFrames_{false};
+  bool accurateRounding_{false};
   std::string avSourcePixelFormat_;
   // ------ libav state
   AVCodecContext * codecContext_{nullptr};
