@@ -204,6 +204,12 @@ void Encoder::doOpenCodec(int width, int height, const std::string & origEncodin
   if (encoder_.empty()) {
     throw(std::runtime_error("no codec set!"));
   }
+  // Without a target format from the user, feed the source image to swscale as it is if
+  // possible, instead of converting it to bgr8 with cv_bridge first.
+  if (cvBridgeTargetFormat_.empty()) {
+    cvBridgeTargetFormat_ =
+      utils::requires_cv_bridge_conversion(origEncoding) ? "bgr8" : origEncoding;
+  }
   if ((width % 32) != 0) {
     RCLCPP_WARN(logger_, "horiz res must be multiple of 32!");
   }
@@ -353,6 +359,15 @@ void Encoder::encodeImage(const Image & msg)
         msg.step);
       // Add empty color channels to the bottom of matrix
       img.push_back(cv::Mat::zeros(msg.height / 2, msg.width, cv::DataType<uint8_t>::type));
+      doEncodeImage(img, msg.header, t0);
+    } else if (
+      msg.encoding == cvBridgeTargetFormat_ &&
+      static_cast<int>(msg.step) ==
+        av_image_get_linesize(static_cast<AVPixelFormat>(wrapperFrame_->format), msg.width, 0)) {
+      // already in the source format, without row padding: wrap without copying
+      cv::Mat img(
+        msg.height, msg.width, cv_bridge::getCvType(msg.encoding),
+        const_cast<uint8_t *>(msg.data.data()), msg.step);
       doEncodeImage(img, msg.header, t0);
     } else {
       cv::Mat img = cv_bridge::toCvCopy(msg, cvBridgeTargetFormat_)->image;

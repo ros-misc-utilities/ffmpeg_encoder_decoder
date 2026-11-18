@@ -38,6 +38,58 @@ TEST(ffmpeg_encoder_decoder, encoder_decoder_bgr8)
   tester.check();
 }
 
+// The following tests leave the cv_bridge target format unset, so that the
+// encoder passes the image to libswscale without a cv_bridge conversion.
+// "tune=zerolatency" makes libx264 return each packet while encoding instead
+// of only on flush, so that the packet size reported during encoding is
+// checked as well.
+
+TEST(ffmpeg_encoder_decoder, encoder_decoder_rgb8_no_conversion)
+{
+  const std::string orig_enc = "rgb8";
+  EncoderDecoderTester tester;
+  // encoding options
+  tester.setOriginalROSEncoding(orig_enc);
+  tester.setEncoder("libx264rgb");
+  tester.addAVOption("crf", "0");  // needed for lossless
+  tester.addAVOption("tune", "zerolatency");
+  tester.setExpectedPacketEncoding("h264;bgr24;" + orig_enc + ";" + orig_enc);
+  // decoding options
+  tester.setFinalROSEncoding(orig_enc);
+  tester.setDecoder("h264");
+  tester.setDecoderExpectedAVPixFmt("gbrp");
+  tester.runTest();
+  tester.check();
+}
+
+static void testYUV422NoConversion(const std::string & orig_enc)
+{
+  EncoderDecoderTester tester;
+  // encoding options
+  tester.setOriginalROSEncoding(orig_enc);
+  tester.setEncoder("libx264");
+  tester.setAVSourcePixelFormat("yuv422p");  // keep the chroma resolution: lossless
+  tester.addAVOption("crf", "0");            // needed for lossless
+  tester.addAVOption("tune", "zerolatency");
+  tester.setExpectedPacketEncoding("h264;yuv422p;" + orig_enc + ";" + orig_enc);
+  // decoding options
+  tester.setFinalROSEncoding(orig_enc);
+  tester.setDecoder("h264");
+  tester.setDecoderExpectedAVPixFmt("yuv422p");
+  tester.runTest();
+  tester.check();
+}
+
+TEST(ffmpeg_encoder_decoder, encoder_decoder_yuyv_no_conversion)
+{
+  testYUV422NoConversion("yuv422_yuy2");
+}
+
+TEST(ffmpeg_encoder_decoder, encoder_decoder_uyvy_no_conversion)
+{
+  testYUV422NoConversion("yuv422");
+}
+
 TEST(ffmpeg_encoder_decoder, encoder_decoder_mono)
 {
   const std::string orig_enc = "mono8";

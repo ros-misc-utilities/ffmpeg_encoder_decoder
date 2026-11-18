@@ -169,6 +169,13 @@ enum AVPixelFormat ros_to_av_pix_format(const std::string & ros_pix_fmt);
 std::vector<std::string> split_by_char(const std::string & str_list, const char sep);
 
 /**
+ * \brief determine if libswscale needs a cv_bridge conversion before it can read an encoding
+ * \param encoding ROS message encoding, e.g. rgb8
+ * \return false if libswscale reads images of this encoding directly
+ */
+bool requires_cv_bridge_conversion(const std::string & encoding);
+
+/**
  * \brief determine if given ROS single-channel encoding fits into libav color format
  * \param encoding ROS message encoding, e.g. bayer_rggb8
  * \param fmt libav color format to test for
