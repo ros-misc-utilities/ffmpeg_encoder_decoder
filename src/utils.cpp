@@ -365,6 +365,14 @@ static bool isNV12LikeFormat(enum AVPixelFormat fmt)
   return (fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_YUV420P);
 }
 
+bool requires_cv_bridge_conversion(const std::string & encoding)
+{
+  namespace enc = sensor_msgs::image_encodings;
+  return (
+    encoding != enc::RGB8 && encoding != enc::BGR8 && encoding != enc::RGBA8 &&
+    encoding != enc::BGRA8 && encoding != enc::YUV422 && encoding != enc::YUV422_YUY2);
+}
+
 bool encode_single_channel_as_color(const std::string & encoding, enum AVPixelFormat fmt)
 {
   return (sensor_msgs::image_encodings::numChannels(encoding) == 1 && isNV12LikeFormat(fmt));

@@ -148,8 +148,9 @@ public:
    *
    * Sets the target format of the first image conversion done via
    * cv_bridge (cv_bridge_target_format). See explanation in the
-   * README file. Must be set before calling initialize(), or else
-   * it will default to "bgr8". The cv_bridge_target_format must
+   * README file. Must be set before calling initialize(). If not set,
+   * initialize() uses the image encoding when libswscale can read it
+   * directly (no conversion), and "bgr8" otherwise. The cv_bridge_target_format must
    * be compatible with some AV_PIX_FMT* type, or else an exception
    * will be thrown when calling initialize().
    *
@@ -387,7 +388,7 @@ private:
   std::vector<std::pair<std::string, std::string>> avOptions_;
 
   AVPixelFormat pixFormat_{AV_PIX_FMT_NONE};
-  std::string cvBridgeTargetFormat_ = "bgr8";
+  std::string cvBridgeTargetFormat_;  // empty: picked by initialize()
   AVRational timeBase_{1, 100};
   AVRational frameRate_{100, 1};
   bool usesHardwareFrames_{false};

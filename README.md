@@ -55,6 +55,7 @@ The diagram above shows the stations that a ROS Image message passes as it trave
 1) The ROS image (with [ROS sensor\_msgs/Image encoding](https://github.com/ros2/common_interfaces/blob/a2ef867438e6d4eed074d6e3668ae45187e7de86/sensor_msgs/include/sensor_msgs/image_encodings.hpp)) is first converted with the ROS [cv\_bridge](https://github.com/ros-perception/vision_opencv) into the ``cv_bridge_target_format``.
  This conversion is necessary because some ROS encodings (like bayer images) are not supported by libswscale.
  The ``cv_bridge_target_format`` can be set via ``setCVBridgeTargetFormat(const std::string & fmt)``.
+If it is not set, the encoder uses the encoding of the ROS image when libswscale can read it directly (e.g. ``rgb8``, ``bgr8``, ``yuv422_yuy2``), so that no cv\_bridge conversion takes place, and ``bgr8`` otherwise.
  If this format is not set explicitly the image will be converted to the default format of ``bgr8``.
  This may not be what you want for e.g. ``mono8`` (gray) or Bayer images.
  Ideally the``cv_bridge_target_format`` can be directly used by the libav decoder so the next step becomes a no-op.
